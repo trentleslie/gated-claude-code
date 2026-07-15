@@ -1,4 +1,4 @@
-import argparse, hashlib, os, shutil, subprocess, sys
+import argparse, hashlib, os, shutil, subprocess, sys, uuid
 import pandas as pd
 from .sdc import check_table
 from .scrub import scrub
@@ -15,6 +15,14 @@ def _iter_artifacts(out_dir):
         for name in files:
             full = os.path.join(root, name)
             yield full, os.path.relpath(full, out_dir)
+
+def _quarantine(full, rel, queue_dir, sh):
+    # unique flat destination so no two quarantined artifacts (across runs OR within a
+    # run via path-flattening) can overwrite each other; queue_dir stays flat for review.
+    safe_name = rel.replace(os.sep, "_")
+    dest = os.path.join(queue_dir, f"{sh}_{uuid.uuid4().hex[:8]}_{safe_name}")
+    shutil.move(full, dest)
+    return dest
 
 def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAULTS):
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
@@ -33,7 +41,6 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAUL
         return {"status": "error", "outputs": [], "message": scrub(proc.stderr)}
     released, queued = [], []
     for full, rel in sorted(_iter_artifacts(out_dir), key=lambda t: t[1]):
-        safe_name = rel.replace(os.sep, "_")
         if rel.endswith(".csv"):
             try:
                 v = check_table(pd.read_csv(full), thresholds)
@@ -45,18 +52,19 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAUL
                 released.append(full)
                 verdict, reason = v.status, v.reason
             else:
-                dest = os.path.join(queue_dir, f"{sh}_{safe_name}")
-                shutil.move(full, dest)
+                dest = _quarantine(full, rel, queue_dir, sh)
                 queued.append(dest)
                 verdict = "block" if v else "unclassifiable"
                 reason = v.reason if v else "unreadable output"
         else:
             # non-CSV artifact cannot be gate-checked -> quarantine (fail-closed)
-            dest = os.path.join(queue_dir, f"{sh}_{safe_name}")
-            shutil.move(full, dest)
+            dest = _quarantine(full, rel, queue_dir, sh)
             queued.append(dest)
             verdict, reason = "unclassifiable", "non-csv artifact quarantined"
-        audit.record({"script_hash": sh, "artifact": rel, "verdict": verdict, "reason": reason})
+        record = {"script_hash": sh, "artifact": rel, "verdict": verdict, "reason": reason}
+        if verdict in ("block", "unclassifiable"):
+            record["quarantined_to"] = dest
+        audit.record(record)
 
     # always record a run-level entry so no successful run is trace-less
     audit.record({"script_hash": sh, "verdict": "run",

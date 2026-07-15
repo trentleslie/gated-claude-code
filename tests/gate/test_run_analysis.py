@@ -37,3 +37,25 @@ def test_zero_artifact_run_is_audited(tmp_path):
             str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))
     assert r["status"] == "released" and r["outputs"] == []
     assert any(e.get("verdict") == "run" for e in AuditLog(str(tmp_path/'audit.jsonl')).entries())
+
+def test_flatten_collision_both_quarantined(tmp_path):
+    # a/b.csv and a_b.csv previously flattened to the same queue name; both must survive
+    import glob
+    body = ("import os, pandas as pd\n"
+            "d = os.environ['OUTPUT_DIR']\n"
+            "os.makedirs(os.path.join(d, 'a'), exist_ok=True)\n"
+            "pd.DataFrame({'x': range(100)}).to_csv(os.path.join(d, 'a', 'b.csv'), index=False)\n"
+            "pd.DataFrame({'x': range(100)}).to_csv(os.path.join(d, 'a_b.csv'), index=False)\n")
+    r = run(_script(tmp_path, body), str(tmp_path/'data'), str(tmp_path/'out'),
+            str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))
+    assert r["status"] == "queued"
+    assert len(glob.glob(str(tmp_path/'queue'/'*'))) == 2   # neither overwrote the other
+
+def test_identical_script_reruns_dont_overwrite_queue(tmp_path):
+    import glob
+    body = ("import os, pandas as pd\n"
+            "pd.DataFrame({'x': range(100)}).to_csv(os.path.join(os.environ['OUTPUT_DIR'],'r.csv'), index=False)\n")
+    args = (str(tmp_path/'data'), str(tmp_path/'out'), str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))
+    run(_script(tmp_path, body), *args)
+    run(_script(tmp_path, body), *args)   # identical script, same artifact name, second run
+    assert len(glob.glob(str(tmp_path/'queue'/'*'))) == 2   # one quarantined file per run
