@@ -20,7 +20,21 @@ def test_minmax_on_identifier_queued(tmp_path):
     assert _run(tmp_path, body)["status"] == "queued"
 
 def test_tiny_subgroup_suppressed(tmp_path):
+    import pandas as pd
     body = ("import pandas as pd, os\n"
             "pd.DataFrame({'group':['a','b'],'count':[100,2]})"
             ".to_csv(os.path.join(os.environ['OUTPUT_DIR'],'r.csv'), index=False)\n")
-    assert _run(tmp_path, body)["status"] in ("released",)  # b suppressed, a released
+    r = _run(tmp_path, body)
+    assert r["status"] == "released"
+    released = pd.read_csv(r["outputs"][0])
+    assert 2 not in released["count"].tolist()      # small cell (n<5) suppressed
+    assert 100 in released["count"].tolist()        # large cell retained
+    assert "b" not in released["group"].tolist()
+
+def test_giant_frame_without_identifier_is_queued(tmp_path):
+    # row-cap (>20 rows) must block on its own, even with an innocuous column name
+    body = ("import pandas as pd, os\n"
+            "pd.DataFrame({'value': range(100)})"
+            ".to_csv(os.path.join(os.environ['OUTPUT_DIR'], 'r.csv'), index=False)\n")
+    r = _run(tmp_path, body)
+    assert r["status"] == "queued"
