@@ -13,10 +13,11 @@ def test_synthetic_shape_and_columns():
     assert set(df["sex"].unique()) <= {"M", "F"}
 
 
-def test_sensitive_column_is_placeholder():
+def test_sensitive_column_is_fabricated():
     prof = profile_file(str(FX / "with_ids.csv"))
     df = synthesize(prof, n_rows=10)
-    assert (df["email"] == "<suppressed>").all()
+    assert "<suppressed>" not in df["email"].tolist()
+    assert all(str(v).startswith("FAKE_") for v in df["email"])
 
 
 def test_numeric_values_within_histogram_range():
@@ -44,10 +45,13 @@ def test_deterministic_same_seed():
     assert synthesize(prof, n_rows=50, seed=7).equals(synthesize(prof, n_rows=50, seed=7))
 
 
-def test_empty_histogram_numeric_suppressed():
+def test_empty_histogram_numeric_gets_fake_numbers():
     fp = {"columns": {"c": {"dtype": "int64", "n": 50, "pct_missing": 0.0,
                             "cardinality": 1, "sensitive": False, "histogram": []}}}
-    assert (synthesize(fp, n_rows=10)["c"] == "<suppressed>").all()
+    df = synthesize(fp, n_rows=10)
+    assert "<suppressed>" not in df["c"].astype(str).tolist()
+    import pandas as pd
+    assert pd.api.types.is_numeric_dtype(df["c"])
 
 
 def test_join_key_column_uses_fake_pool_not_suppressed():
@@ -69,8 +73,33 @@ def test_two_files_share_pool_so_joins_have_overlap():
     assert set(a["public_client_id"]) & set(b["public_client_id"])   # overlap -> joinable
 
 
-def test_synthesize_without_join_keys_unchanged():
-    # backward compat: sensitive join-less call still suppresses
+def test_synthesize_without_join_keys_fabricates_not_suppresses():
+    # without an id_pool/join_keys, sensitive columns are fabricated tokens, not "<suppressed>"
     col = {"sensitive": True, "categories": None}
     df = synthesize({"columns": {"public_client_id": col}}, n_rows=10)
-    assert (df["public_client_id"] == "<suppressed>").all()
+    assert "<suppressed>" not in df["public_client_id"].tolist()
+    assert all(str(v).startswith("FAKE_") for v in df["public_client_id"])
+
+
+def test_sensitive_numeric_column_gets_fake_numbers(tmp_path):
+    col = {"dtype": "float64", "n": 100, "pct_missing": 0.0, "cardinality": 100,
+           "sensitive": True, "values_suppressed": True, "categories": None}
+    df = synthesize({"columns": {"x": col}}, n_rows=30, seed=1)
+    import pandas as pd
+    assert pd.api.types.is_numeric_dtype(df["x"])          # numeric, not "<suppressed>" strings
+    assert "<suppressed>" not in df["x"].astype(str).tolist()
+
+
+def test_sensitive_date_column_gets_fake_dates():
+    import re
+    col = {"dtype": "object", "n": 100, "pct_missing": 0.0, "cardinality": 90,
+           "sensitive": True, "categories": None}
+    df = synthesize({"columns": {"collection_date": col}}, n_rows=30, seed=1)
+    assert all(re.match(r"20\d\d-\d\d-\d\d", str(v)) for v in df["collection_date"])   # fabricated dates
+
+
+def test_sensitive_text_id_gets_fake_token():
+    col = {"dtype": "object", "n": 100, "pct_missing": 0.0, "cardinality": 100,
+           "sensitive": True, "categories": None}
+    df = synthesize({"columns": {"sample_id": col}}, n_rows=10, seed=1)
+    assert all(str(v).startswith("FAKE_") for v in df["sample_id"])
