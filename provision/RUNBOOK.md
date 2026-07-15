@@ -130,3 +130,13 @@ interactively). Optional: drive via ccr `claude remote-control` for phone/web.
 
 Still-running-but-now-unused-for-the-agent: the Claude Science daemon (cs-arivale.phenoma.ai), the gate-api
 HTTP service (:8899), and the quick tunnel — can be left or torn down; the sudo bridge is the live path.
+
+## Operator launchers (DONE 2026-07-15)
+
+Installed in /usr/local/bin on the VM (also in provision/bin/):
+- `claude-arivale`        -> sudo -iu cs-gated; cd ~/analysis; claude   (plain TUI, no tmux, foreground)
+- `claude-arivale-remote` -> same in a persistent tmux session 'arivale' + --dangerously-skip-permissions
+                             (Ctrl-b d to detach; re-run to reattach from anywhere; tmux kill-session -t arivale to end)
+- `claude-arivale-launch` -> shared helper (becomes cs-gated, cd ~/analysis, exec claude $flags)
+skip-permissions is safe here: guardrails are OS-level (cs-gated can't read raw data) + the gate/audit, not
+Claude's approval prompts. Requires the operator to have (passwordless) sudo to cs-gated (root does).

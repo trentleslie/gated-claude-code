@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Launch the gated Arivale analyst as the cs-gated user. Any args are passed to claude.
+exec sudo -iu cs-gated env CLAUDE_FLAGS="$*" bash -lc \
+  'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; cd ~/analysis && exec claude $CLAUDE_FLAGS'
