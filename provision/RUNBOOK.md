@@ -75,3 +75,16 @@ Three real-data profiler fixes were needed (each committed + tested):
 Leak audit (post-fix) — CLEAN: 0 raw min/max keys, known client-id absent, 487 sensitive cols,
 **0 suspicious category values** (no dates/ids/emails leaked). Dictionary delivered to `/var/gate/dict`
 (group csbridge, cs-gated-readable); verified cs-gated CAN read dictionary+synthetic, CANNOT read raw data.
+
+## Relational, fully-fabricated synthetic (DONE 2026-07-15)
+
+Regenerate from the clean dictionary ONLY (no raw-data read):
+  `sudo -u cs-exec build-synthetic --dictionary /var/gate/dict/dictionary.json --out /var/gate/dict --id-pool-size 50`
+- Join keys (public_client_id) draw from a shared pool of FABRICATED ids (SYNTH_0001..) -> cross-file joins work
+  (chemistries x metabolomics -> 294 rows on synthetic).
+- Every column fabricated by type (commits 969ee96 relational + eca06c0 full-fabrication): dates->fake ISO dates,
+  numerics->fake numbers, safe categoricals->real vocab, safe numerics->real histogram marginals, keys->pool.
+  No "<suppressed>" placeholders remain -> synthetic exercises the SAME code paths as real (max synthetic->real fidelity).
+- Values are invented from dtype/name (never from real data): verified no real client id / no leaks in synthetic.
+- Delivered group csbridge, cs-gated-readable. Rationale: "works on synthetic" predicts "works on real" for schema/joins/
+  logic; the gate's scrubbed-error feedback on real runs closes the residual gap (OpenSAFELY-style).
