@@ -88,3 +88,14 @@ Regenerate from the clean dictionary ONLY (no raw-data read):
 - Values are invented from dtype/name (never from real data): verified no real client id / no leaks in synthetic.
 - Delivered group csbridge, cs-gated-readable. Rationale: "works on synthetic" predicts "works on real" for schema/joins/
   logic; the gate's scrubbed-error feedback on real runs closes the residual gap (OpenSAFELY-style).
+
+## Localhost gate-API — the working agent bridge (DONE 2026-07-15)
+
+The Claude Science agent's sandbox blocks sudo (NoNewPrivs) and doesn't mount /var/gate, so the sudo/file
+bridge is unreachable FROM THE AGENT. Solution: `gate-api` (stdlib HTTP service, run as cs-exec, systemd
+`gate-api.service`, bind 127.0.0.1:8899, token at /var/gate/service.token). Endpoints (X-Gate-Token header):
+GET /health, /dictionary.json, /dictionary.md, /synthetic[/<name>], POST /submit (body=script -> runs the
+SAME bwrap+SDC+audit gate against real data -> returns {status, message, outputs:[{name,content}]}).
+VERIFIED end-to-end: agent's vendor-count analysis on real chemistries.tsv -> released {LCA:10379, Quest:788}.
+OPEN: confirm the agent's sandbox can reach host 127.0.0.1:8899 (claude-science network approval card); if its
+net namespace is isolated, bind to the host IP instead. submit-analysis/sudo bridge kept but is agent-unreachable.
