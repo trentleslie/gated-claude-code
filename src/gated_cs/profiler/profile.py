@@ -66,7 +66,9 @@ def profile_column(series, name="", thresholds=DEFAULTS):
 
 def profile_file(path, thresholds=DEFAULTS):
     parsed = parse_file(path)
-    df = pd.read_csv(path, sep=parsed.delimiter, comment="#")
+    header_line = max(parsed.data_start_line - 1, 0)
+    df = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line,
+                     header=0, low_memory=False)
     cols = {}
     for name in parsed.header:
         col = profile_column(df[name], name=name, thresholds=thresholds)

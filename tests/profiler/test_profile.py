@@ -78,3 +78,11 @@ def test_histogram_handles_non_finite_values():
     # all emitted bin edges are finite (no inf leaked into the histogram)
     for b in hist:
         assert np.isfinite(b["lo"]) and np.isfinite(b["hi"])
+
+def test_hash_prefixed_column_name_is_not_comment_stripped(tmp_path):
+    # QIIME-style: a column literally named '#OTUs' must survive (comment='#' would drop it)
+    p = tmp_path / "otu.tsv"
+    p.write_text("# ARIVALE SNAPSHOT\n# name: otu\nclient\t#OTUs\tcount\n"
+                 "c1\totuA\t7\nc2\totuB\t9\nc3\totuA\t4\n")
+    out = profile_file(str(p))
+    assert set(out["columns"]) == {"client", "#OTUs", "count"}   # all 3 kept, none comment-stripped
