@@ -99,3 +99,17 @@ SAME bwrap+SDC+audit gate against real data -> returns {status, message, outputs
 VERIFIED end-to-end: agent's vendor-count analysis on real chemistries.tsv -> released {LCA:10379, Quest:788}.
 OPEN: confirm the agent's sandbox can reach host 127.0.0.1:8899 (claude-science network approval card); if its
 net namespace is isolated, bind to the host IP instead. submit-analysis/sudo bridge kept but is agent-unreachable.
+
+## Agent-reachable gate: public quick tunnel (DONE 2026-07-15)
+
+Dead-ends (both HARD platform blocks in the claude-science agent sandbox, not fixable our side):
+- localhost/private-IP (127.0.0.1:8899, 10.0.0.50:8899): agent net-namespace isolated + egress proxy hard-refuses
+  private/reserved IPs and non-standard ports.
+- gate-arivale.phenoma.ai (:8899 via the named tunnel): behind Cloudflare Access SSO (phenome-health default);
+  agent can't do interactive SSO, and we have no Cloudflare dashboard access to add a bypass/service-token.
+
+WORKING path: cloudflared QUICK tunnel (no account/dashboard/Access) -> gate-api:8899, giving a public
+https://<random>.trycloudflare.com on 443. systemd `gate-tunnel.service` (reboot-safe); `gate-url` prints the
+current URL. Protected by X-Gate-Token + the disclosure gate. Verified: real vendor-count submit -> released.
+CAVEAT: the trycloudflare URL CHANGES on tunnel restart (VM reboot / process death) -> re-fetch with `gate-url`,
+re-add to the agent's Domain Allowlist, re-point the agent. (A stable named tunnel needs a Cloudflare account.)
