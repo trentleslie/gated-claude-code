@@ -1,5 +1,7 @@
 import pathlib
+import pytest
 from gated_cs.gate.review import list_pending, approve, reject
+from gated_cs.gate.audit import AuditLog
 
 def _seed(tmp_path):
     q = tmp_path / "queue"; q.mkdir()
@@ -41,3 +43,28 @@ def test_reject_non_csv(tmp_path):
     (q / "abc_raw.json").write_text('{"x": 1}')
     reject("abc_raw.json", str(q), str(tmp_path / "audit.jsonl"))
     assert list_pending(str(q)) == []
+
+def test_reject_path_traversal_is_contained(tmp_path):
+    outside = tmp_path / "secret.txt"
+    outside.write_text("keep me")
+    q = tmp_path / "queue"; q.mkdir()
+    with pytest.raises(FileNotFoundError):
+        reject("../secret.txt", str(q), str(tmp_path / "audit.jsonl"))
+    assert outside.exists()   # traversal did not delete the outside file
+
+def test_approve_writes_audit_entry(tmp_path):
+    q = tmp_path / "queue"; q.mkdir()
+    (q / "a.csv").write_text("group,count\nx,3\n")
+    res = tmp_path / "results"
+    audit = tmp_path / "audit.jsonl"
+    approve("a.csv", str(q), str(res), str(audit))
+    entries = AuditLog(str(audit)).entries()
+    assert any(e.get("verdict") == "review:approve" and e.get("artifact") == "a.csv" for e in entries)
+
+def test_reject_writes_audit_entry(tmp_path):
+    q = tmp_path / "queue"; q.mkdir()
+    (q / "b.csv").write_text("group,count\ny,2\n")
+    audit = tmp_path / "audit.jsonl"
+    reject("b.csv", str(q), str(audit))
+    entries = AuditLog(str(audit)).entries()
+    assert any(e.get("verdict") == "review:reject" and e.get("artifact") == "b.csv" for e in entries)

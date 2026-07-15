@@ -8,6 +8,7 @@ def list_pending(queue_dir):
                   if os.path.isfile(os.path.join(queue_dir, n)))
 
 def approve(name, queue_dir, results_dir, audit_path):
+    name = os.path.basename(name)
     os.makedirs(results_dir, exist_ok=True)
     dest = os.path.join(results_dir, name)
     shutil.move(os.path.join(queue_dir, name), dest)
@@ -15,6 +16,7 @@ def approve(name, queue_dir, results_dir, audit_path):
     return dest
 
 def reject(name, queue_dir, audit_path):
+    name = os.path.basename(name)
     os.remove(os.path.join(queue_dir, name))
     AuditLog(audit_path).record({"artifact": name, "verdict": "review:reject"})
 
