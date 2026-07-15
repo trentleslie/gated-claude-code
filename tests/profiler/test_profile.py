@@ -23,3 +23,30 @@ def test_high_cardinality_suppressed():
 def test_profile_file_carries_descriptions():
     out = profile_file(str(FX / "simple.csv"))
     assert out["columns"]["age"]["description"] == "age in years"
+
+def test_histogram_edges_grid_aligned_no_raw_max():
+    s = pd.Series(range(100))          # min 0, max 99
+    hist = profile_column(s)["histogram"]
+    assert hist
+    edges = sorted({b["lo"] for b in hist} | {b["hi"] for b in hist})
+    step = edges[1] - edges[0]
+    for e in edges:                    # every edge is a multiple of the step (grid-aligned)
+        assert abs(e / step - round(e / step)) < 1e-9
+    assert 99.0 not in edges           # exact raw max never an edge
+    assert all(b["count"] >= 5 for b in hist)
+
+def test_histogram_rare_outlier_value_not_an_edge():
+    s = pd.Series([1] * 95 + [104] * 5)   # outlier count == bin_min_count, bin NOT suppressed
+    hist = profile_column(s)["histogram"]
+    edges = {b["lo"] for b in hist} | {b["hi"] for b in hist}
+    assert 104.0 not in edges          # precise outlier never disclosed via a bin edge
+
+def test_histogram_all_bins_suppressed_is_empty():
+    s = pd.Series([1, 2, 3, 4])         # each unique, every bin count < k=5
+    assert profile_column(s)["histogram"] == []
+
+def test_categorical_cap_boundary():
+    at_cap = profile_column(pd.Series([f"c{i}" for i in range(50)]))
+    assert at_cap["categories"] is not None and len(at_cap["categories"]) == 50
+    over_cap = profile_column(pd.Series([f"c{i}" for i in range(51)]))
+    assert over_cap["categories"] is None and over_cap["suppressed_high_cardinality"] is True
