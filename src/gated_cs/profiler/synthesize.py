@@ -9,8 +9,10 @@ def synthesize(file_profile, n_rows=100, seed=0):
         elif "histogram" in col and col["histogram"]:
             bins = col["histogram"]
             weights = [b["count"] for b in bins]
-            data[name] = [round(rng.uniform(b["lo"], b["hi"]))
-                          for b in rng.choices(bins, weights=weights, k=n_rows)]
+            chosen = rng.choices(bins, weights=weights, k=n_rows)
+            vals = [rng.uniform(b["lo"], b["hi"]) for b in chosen]
+            is_int = "int" in str(col.get("dtype", "")).lower()
+            data[name] = [int(round(v)) for v in vals] if is_int else vals
         elif col.get("categories"):
             data[name] = [rng.choice(col["categories"]) for _ in range(n_rows)]
         else:
