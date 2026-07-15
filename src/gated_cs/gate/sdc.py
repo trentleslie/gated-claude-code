@@ -10,9 +10,12 @@ class Verdict:
     reason: str
     safe_df: pd.DataFrame | None = None
 
+_COUNT_TOKENS = {"count", "cnt", "n", "freq", "frequency", "size", "tally", "num", "total"}
+
 def _count_col(df):
     for c in df.columns:
-        if c.lower() in ("count", "n", "freq", "size"):
+        tokens = set(re.split(r"[^a-z0-9]+", str(c).lower()))
+        if _COUNT_TOKENS & tokens:
             return c
     return None
 
@@ -24,7 +27,7 @@ def check_table(df, thresholds=DEFAULTS):
             return Verdict("block", f"identifier-like column: {c}")
     cc = _count_col(df)
     if cc is not None:
-        small = df[cc] < thresholds.k
+        small = ~(df[cc] >= thresholds.k)   # NaN counts -> not >= k -> suppressed (fail-closed)
         if small.any():
             safe = df.loc[~small].reset_index(drop=True)
             return Verdict("suppress", f"suppressed {int(small.sum())} cells < k={thresholds.k}", safe)
