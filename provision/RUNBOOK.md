@@ -113,3 +113,20 @@ https://<random>.trycloudflare.com on 443. systemd `gate-tunnel.service` (reboot
 current URL. Protected by X-Gate-Token + the disclosure gate. Verified: real vendor-count submit -> released.
 CAVEAT: the trycloudflare URL CHANGES on tunnel restart (VM reboot / process death) -> re-fetch with `gate-url`,
 re-add to the agent's Domain Allowlist, re-point the agent. (A stable named tunnel needs a Cloudflare account.)
+
+## PIVOT: gated brain = Claude Code as cs-gated (DONE 2026-07-15)
+
+Claude Science's agent sandbox cannot reach the local gate by design (sudo blocked by no_new_privs;
+private-IP + non-standard-port blocked; *.trycloudflare.com on the exfil denylist; all phenoma.ai hosts
+behind Cloudflare Access SSO the agent can't complete; no Cloudflare dashboard access to add a bypass/
+service-token). So the gated brain runs as **Claude Code as the cs-gated user** instead — a normal process,
+so the already-proven sudo->submit-analysis->gate bridge works directly (no network/tunnel needed).
+
+Setup: Claude Code (native, 2.1.210) at /home/cs-gated/.local/bin/claude; workspace /home/cs-gated/analysis/
+(CLAUDE.md orienting the gated analyst + symlinks to /var/gate/dict/{dictionary.md,dictionary.json,
+synthetic_samples} and /var/gate/results). VERIFIED: cs-gated normal shell -> submit-analysis -> "1 released";
+cs-gated still denied raw data. Start: `ssh root@10.0.0.50; sudo -iu cs-gated; cd ~/analysis; claude` (auth
+interactively). Optional: drive via ccr `claude remote-control` for phone/web.
+
+Still-running-but-now-unused-for-the-agent: the Claude Science daemon (cs-arivale.phenoma.ai), the gate-api
+HTTP service (:8899), and the quick tunnel — can be left or torn down; the sudo bridge is the live path.
