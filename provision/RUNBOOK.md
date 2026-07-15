@@ -58,3 +58,20 @@ docs/solutions/.../claude-science-remote-warp-cloudflare-access-2026-07-06.md, a
 Can the claude-science agent (inside ITS OWN bwrap sandbox) invoke `submit-analysis` -> `sudo -u cs-exec`?
 sudo may not work in a user namespace. If not, expose the bridge to the daemon another way (e.g. a
 local unix-socket submission service the agent reaches via an approved network grant, instead of sudo).
+
+## Phase 2 — dictionary built from REAL data (DONE 2026-07-15)
+
+Data at `/procedure/data/local_data/ARIVALE_SNAPSHOTS_2025/` (76 TSVs, ~3.3 GB). On arrival it was
+**world-readable** — locked to `root:cs-exec 750/640` (cs-gated denied) BEFORE any profiling.
+Build: `sudo -u cs-exec build-dictionary <dir> --out /var/gate/dict` → 76 files, 36,005 columns, 20 MB dict.
+
+Three real-data profiler fixes were needed (each committed + tested):
+- `6fdb10e` drop non-finite (inf) values before histogram binning (a numeric col had inf).
+- `f445a26` read via `skiprows` not `comment="#"` — Arivale files have 13 `#` metadata lines AND a
+  microbiome file has a column literally named `#OTUs`; `comment="#"` was stripping it mid-line.
+- `c7b0352` flag date columns/values as sensitive (HIPAA Safe-Harbor) — batch/deprecation dates were
+  being listed as categories.
+
+Leak audit (post-fix) — CLEAN: 0 raw min/max keys, known client-id absent, 487 sensitive cols,
+**0 suspicious category values** (no dates/ids/emails leaked). Dictionary delivered to `/var/gate/dict`
+(group csbridge, cs-gated-readable); verified cs-gated CAN read dictionary+synthetic, CANNOT read raw data.
