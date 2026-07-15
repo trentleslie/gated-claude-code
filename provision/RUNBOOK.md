@@ -43,12 +43,6 @@ Sandbox (bubblewrap 0.11, wraps only the untrusted child inside `run_analysis`):
    ```
    Review `/var/gate/dict/dictionary.md` by eye; confirm no raw values before handing the dictionary to cs-gated.
 
-## Phase 3 — the gated Claude Science instance (TODO)
-
-5. Stand up a Claude Science daemon running **as cs-gated** (systemd + caddy Host-rewrite + cloudflared tunnel,
-   mirroring the pop-os/`claude-science-vm` recipe but under the unprivileged cs-gated user), with the
-   dictionary + synthetic samples as its only view of the data and `submit-analysis` as its bridge to real data.
-
 ## Phase 3 — the gated Claude Science instance (DONE 2026-07-15, pending auth)
 
 Installed on 10.0.0.50 as the unprivileged **cs-gated** user (recipe from
