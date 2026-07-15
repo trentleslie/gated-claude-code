@@ -48,3 +48,29 @@ def test_empty_histogram_numeric_suppressed():
     fp = {"columns": {"c": {"dtype": "int64", "n": 50, "pct_missing": 0.0,
                             "cardinality": 1, "sensitive": False, "histogram": []}}}
     assert (synthesize(fp, n_rows=10)["c"] == "<suppressed>").all()
+
+
+def test_join_key_column_uses_fake_pool_not_suppressed():
+    col = {"dtype": "object", "n": 100, "pct_missing": 0.0, "cardinality": 100,
+           "sensitive": True, "values_suppressed": True, "categories": None}
+    fp = {"columns": {"public_client_id": col}}
+    pool = [f"SYNTH_{i:04d}" for i in range(5)]
+    df = synthesize(fp, n_rows=50, seed=1, join_keys={"public_client_id"}, id_pool=pool)
+    assert set(df["public_client_id"]) <= set(pool)
+    assert "<suppressed>" not in df["public_client_id"].tolist()
+
+
+def test_two_files_share_pool_so_joins_have_overlap():
+    col = {"sensitive": True, "categories": None}
+    a = synthesize({"columns": {"public_client_id": col}}, n_rows=100, seed=1,
+                   join_keys={"public_client_id"}, id_pool=[f"SYNTH_{i:04d}" for i in range(10)])
+    b = synthesize({"columns": {"public_client_id": col}}, n_rows=100, seed=2,
+                   join_keys={"public_client_id"}, id_pool=[f"SYNTH_{i:04d}" for i in range(10)])
+    assert set(a["public_client_id"]) & set(b["public_client_id"])   # overlap -> joinable
+
+
+def test_synthesize_without_join_keys_unchanged():
+    # backward compat: sensitive join-less call still suppresses
+    col = {"sensitive": True, "categories": None}
+    df = synthesize({"columns": {"public_client_id": col}}, n_rows=10)
+    assert (df["public_client_id"] == "<suppressed>").all()

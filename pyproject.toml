@@ -9,6 +9,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 build-dictionary = "gated_cs.profiler.build_dictionary:main"
+build-synthetic = "gated_cs.profiler.build_dictionary:synthetic_main"
 run-analysis = "gated_cs.gate.run_analysis:main"
 gate-review = "gated_cs.gate.review:main"
 
