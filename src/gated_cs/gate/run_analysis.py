@@ -75,8 +75,21 @@ def _quarantine(full, rel, queue_dir, sh):
     shutil.move(full, dest)
     return dest
 
-def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAULTS):
+def _deliver(df_or_path, rel, results_dir, sh):
+    # write a RELEASED artifact into the shared results dir with a unique, flat name
+    # so cs-gated (which cannot see cs-exec-private out_dir) can retrieve it.
+    safe_name = rel.replace(os.sep, "_")
+    dest = os.path.join(results_dir, f"{sh}_{uuid.uuid4().hex[:8]}_{safe_name}")
+    if isinstance(df_or_path, str):
+        shutil.copy(df_or_path, dest)
+    else:
+        df_or_path.to_csv(dest, index=False)   # already-gated (masked) frame
+    return dest
+
+def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None, thresholds=DEFAULTS):
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
+    if results_dir is not None:
+        os.makedirs(results_dir, exist_ok=True)
     audit = AuditLog(audit_path)
     # env for launching bwrap itself / the no-sandbox fallback; the sandboxed child's env
     # is set entirely by --clearenv + --setenv in _child_command
@@ -106,8 +119,12 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAUL
                 v = None
             if v and v.status in ("allow", "suppress"):
                 if v.safe_df is not None:
-                    v.safe_df.to_csv(full, index=False)
-                released.append(full)
+                    dest_out = _deliver(v.safe_df, rel, results_dir, sh) if results_dir else full
+                    if not results_dir:
+                        v.safe_df.to_csv(full, index=False)
+                else:
+                    dest_out = _deliver(full, rel, results_dir, sh) if results_dir else full
+                released.append(dest_out)
                 verdict, reason = v.status, v.reason
             else:
                 dest = _quarantine(full, rel, queue_dir, sh)
@@ -122,6 +139,8 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAUL
         record = {"script_hash": sh, "artifact": rel, "verdict": verdict, "reason": reason}
         if verdict in ("block", "unclassifiable"):
             record["quarantined_to"] = dest
+        elif verdict in ("allow", "suppress") and results_dir:
+            record["delivered_to"] = dest_out
         audit.record(record)
 
     # always record a run-level entry so no successful run is trace-less
@@ -135,8 +154,9 @@ def main():
     ap = argparse.ArgumentParser()
     for arg in ("script", "--data-dir", "--out-dir", "--audit", "--queue"):
         ap.add_argument(arg)
+    ap.add_argument("--results", default=None)
     a = ap.parse_args()
-    r = run(a.script, a.data_dir, a.out_dir, a.audit, a.queue)
+    r = run(a.script, a.data_dir, a.out_dir, a.audit, a.queue, results_dir=a.results)
     print(r["message"]); sys.exit(0 if r["status"] != "error" else 1)
 
 if __name__ == "__main__":

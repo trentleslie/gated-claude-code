@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 [ $# -eq 1 ] || { echo "usage: submit-analysis <script.py>" >&2; exit 2; }
-exec sudo -u cs-exec /opt/gate/run-analysis "$(realpath "$1")"
+src="$(realpath "$1")"
+dest="/var/gate/incoming/$(id -un)-$$-$(basename "$src")"
+cp -- "$src" "$dest"
+chmod 0640 "$dest"
+exec sudo -u cs-exec /opt/gate/run-analysis "$dest"

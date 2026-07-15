@@ -15,8 +15,10 @@ def test_run_analysis_wrapper_pins_trusted_paths():
     assert ":=" not in txt  # not overridable via env
     assert "--audit /var/gate/audit.jsonl" in txt
     assert "--queue" in txt
+    assert "--results /var/gate/results" in txt
     assert "run-analysis" in txt
 
-def test_submit_calls_sudo_cs_exec():
+def test_submit_copies_into_shared_incoming_then_sudo():
     txt = (P / "submit-analysis").read_text()
-    assert "sudo -u cs-exec /opt/gate/run-analysis" in txt
+    assert "/var/gate/incoming" in txt
+    assert "exec sudo -u cs-exec /opt/gate/run-analysis" in txt

@@ -59,3 +59,13 @@ def test_identical_script_reruns_dont_overwrite_queue(tmp_path):
     run(_script(tmp_path, body), *args)
     run(_script(tmp_path, body), *args)   # identical script, same artifact name, second run
     assert len(glob.glob(str(tmp_path/'queue'/'*'))) == 2   # one quarantined file per run
+
+def test_released_output_delivered_to_results_dir(tmp_path):
+    body = ("import os, pandas as pd\n"
+            "pd.DataFrame({'group':['a','b'],'count':[80,60]})"
+            ".to_csv(os.path.join(os.environ['OUTPUT_DIR'],'agg.csv'), index=False)\n")
+    r = run(_script(tmp_path, body), str(tmp_path/'data'), str(tmp_path/'out'),
+            str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'),
+            results_dir=str(tmp_path/'results'))
+    assert r["status"] == "released"
+    assert r["outputs"] and all(str(tmp_path/'results') in p for p in r["outputs"])

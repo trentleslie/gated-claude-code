@@ -14,4 +14,5 @@ exec env -i \
     --data-dir "$DATA_DIR" \
     --out-dir "$OUT_DIR" \
     --audit /var/gate/audit.jsonl \
-    --queue /var/gate/queue
+    --queue /var/gate/queue \
+    --results /var/gate/results
