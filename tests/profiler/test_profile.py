@@ -16,7 +16,10 @@ def test_categorical_vocab_capped():
     assert set(out["categories"]) == {"A", "B", "C"}
 
 def test_high_cardinality_suppressed():
-    s = pd.Series([f"id{i}" for i in range(200)])
+    # cardinality (100) exceeds cardinality_cap (50) but ratio (0.5) stays below the
+    # sensitivity near-uniqueness threshold (0.9), isolating this from Task 4's
+    # identifier heuristic so it still exercises the plain cap-suppression path.
+    s = pd.Series([f"id{i % 100}" for i in range(200)])
     out = profile_column(s)
     assert out["categories"] is None and out["suppressed_high_cardinality"] is True
 
@@ -46,9 +49,11 @@ def test_histogram_all_bins_suppressed_is_empty():
     assert profile_column(s)["histogram"] == []
 
 def test_categorical_cap_boundary():
-    at_cap = profile_column(pd.Series([f"c{i}" for i in range(50)]))
+    # Same isolation as above: keep cardinality at/over the cap while keeping the
+    # uniqueness ratio below Task 4's 0.9 sensitivity threshold via repeats.
+    at_cap = profile_column(pd.Series([f"c{i % 50}" for i in range(60)]))
     assert at_cap["categories"] is not None and len(at_cap["categories"]) == 50
-    over_cap = profile_column(pd.Series([f"c{i}" for i in range(51)]))
+    over_cap = profile_column(pd.Series([f"c{i % 51}" for i in range(60)]))
     assert over_cap["categories"] is None and over_cap["suppressed_high_cardinality"] is True
 
 def test_constant_column_emits_no_histogram():

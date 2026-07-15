@@ -37,11 +37,17 @@ def _histogram(s, thresholds):
             out.append({"lo": float(interval.left), "hi": float(interval.right), "count": int(count)})
     return out
 
-def profile_column(series, thresholds=DEFAULTS):
+def profile_column(series, name="", thresholds=DEFAULTS):
+    from .sensitivity import is_sensitive
     n = int(series.shape[0])
     out = {"dtype": str(series.dtype), "n": n,
            "pct_missing": round(float(series.isna().mean()) * 100, 2),
-           "cardinality": int(series.nunique(dropna=True))}
+           "cardinality": int(series.nunique(dropna=True)),
+           "sensitive": is_sensitive(name, series, thresholds)}
+    if out["sensitive"]:
+        out["values_suppressed"] = True
+        out["categories"] = None
+        return out
     if pd.api.types.is_numeric_dtype(series):
         out["histogram"] = _histogram(series, thresholds)
     else:
@@ -57,7 +63,7 @@ def profile_file(path, thresholds=DEFAULTS):
     df = pd.read_csv(path, sep=parsed.delimiter, comment="#")
     cols = {}
     for name in parsed.header:
-        col = profile_column(df[name], thresholds)
+        col = profile_column(df[name], name=name, thresholds=thresholds)
         if name in parsed.column_descriptions:
             col["description"] = parsed.column_descriptions[name]
         cols[name] = col
