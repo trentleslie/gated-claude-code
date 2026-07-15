@@ -48,3 +48,19 @@ Sandbox (bubblewrap 0.11, wraps only the untrusted child inside `run_analysis`):
 5. Stand up a Claude Science daemon running **as cs-gated** (systemd + caddy Host-rewrite + cloudflared tunnel,
    mirroring the pop-os/`claude-science-vm` recipe but under the unprivileged cs-gated user), with the
    dictionary + synthetic samples as its only view of the data and `submit-analysis` as its bridge to real data.
+
+## Phase 3 — the gated Claude Science instance (DONE 2026-07-15, pending auth)
+
+Installed on 10.0.0.50 as the unprivileged **cs-gated** user (recipe from
+docs/solutions/.../claude-science-remote-warp-cloudflare-access-2026-07-06.md, adapted root->cs-gated):
+- claude-science 0.1.15 binary at `/home/cs-gated/.local/bin/` (copied; needs only glibc 2.17).
+- Daemon: systemd `claude-science.service` (User=cs-gated, `serve --no-browser --no-auto-update --host 127.0.0.1 --port 8002`, ExecStartPre orphan-guard). bwrap 0.11 on PATH satisfies the >=0.8 requirement.
+- Proxy: systemd `claude-science-proxy.service` = caddy on `:8000`, Caddyfile at `/home/cs-gated/claude-science-proxy.Caddyfile` rewriting Host->localhost + Origin->http://localhost:8002.
+- Access: WARP-direct `http://10.0.0.50:8000` (caddy). No cloudflared/DNS (public subdomain deferred = optional Cloudflare step).
+- Login: `ssh root@10.0.0.50 cs-url` prints a single-use nonce URL rewritten to the WARP host. Expect ONE org-adoption re-login on first auth (recipe step G).
+- Health verified: daemon :8002 -> 401, caddy :8000 -> 401, WARP 10.0.0.50:8000 -> 401 (token gate, not forbidden-host).
+
+### OPEN integration question (validate once authenticated)
+Can the claude-science agent (inside ITS OWN bwrap sandbox) invoke `submit-analysis` -> `sudo -u cs-exec`?
+sudo may not work in a user namespace. If not, expose the bridge to the daemon another way (e.g. a
+local unix-socket submission service the agent reaches via an approved network grant, instead of sudo).
