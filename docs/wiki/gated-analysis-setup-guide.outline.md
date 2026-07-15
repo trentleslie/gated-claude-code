@@ -29,7 +29,9 @@ The profiler auto-detects the delimiter and captures `#`-prefixed metadata, so m
 
 ## Prerequisites
 
-A fresh Linux VM with root access and outbound network. The reference VM is Ubuntu 22.04 with sixteen cores, thirty-two gigabytes of memory, and ample disk. Unprivileged user namespaces must be usable, which the provisioning script verifies. The `gated-cs` code package must be reachable from the VM; copy the repository to the box (for example under `/opt/gated-cs-src`).
+A fresh Linux VM with root access and outbound network. The reference fleet uses Ubuntu 22.04 with sixteen cores, thirty-two gigabytes of memory, and ample disk. Unprivileged user namespaces must be usable, which the provisioning script verifies. The `gated-cs` code package must be reachable from the VM; copy the repository to the box (for example under `/opt/gated-cs-src`).
+
+Root access is by SSH key. On Access-for-Infrastructure hosts the key is authorized per virtual machine, so a freshly spun-up instance may reject an otherwise-valid key that works on its siblings; the key must be added to that instance's own procedure before provisioning can begin. A rejected connection whose port 22 is nonetheless open is this authorization gap, not a network fault.
 
 ## Phase 1: provision the boundary (before any data is present, non-disclosive)
 
@@ -48,7 +50,13 @@ The sandbox that runs the untrusted analysis script must wrap only the child pro
 
 ## Phase 2: profile the data (build the dictionary and synthetic surface)
 
-Mount or copy the raw data into the data directory. It will be owned by `cs-exec`; the brain user must not be able to read it. Then, as the data-owning user, run the profiler over the directory.
+Mount or copy the raw data into its directory. A mounted snapshot commonly arrives world-readable, which would expose it to the brain user during the interval before it is secured; lock it immediately with the provided helper, which restores the data-owning user's exclusive read access and confirms the brain user is denied. Run this after every mount, not only the first.
+
+```bash
+lock-gate-data /path/to/data
+```
+
+Point the executor at that directory. The bridge wrapper hard-codes the data path so the brain cannot influence it, and provisioning defaults it to a placeholder; edit the wrapper's `DATA_DIR` (in `/opt/gate/run-analysis`) to the actual data directory. Then, as the data-owning user, run the profiler over it.
 
 ```bash
 sudo -u cs-exec /opt/gated-cs/bin/build-dictionary /path/to/data --out /var/gate/dict
@@ -64,6 +72,15 @@ sudo -u cs-exec /opt/gated-cs/bin/build-synthetic --dictionary /var/gate/dict/di
 
 Confirm that a cross-table join over two synthetic files on the join key returns a non-empty result, that date columns hold fabricated dates and numeric columns hold numbers, and that no real value appears in any synthetic file.
 
+### Replicating onto an identical dataset
+
+When an additional instance serves the identical dataset, the profiling step is unnecessary and should be skipped. The dictionary and synthetic samples are derived from the data rather than from the machine, so the already-audited artifacts from an existing instance are valid verbatim; copy the dictionary directory across rather than re-running the profiler, and re-apply its readable permissions for the brain user. The local raw data must still be present, locked, and addressed by the executor exactly as above; only the profiling and its audit are elided, because the audit was already performed once for that dataset and its result does not change.
+
+```bash
+# copy the audited dictionary + synthetic from an existing instance to the new one
+ssh root@SOURCE 'tar czf - -C /var/gate dict' | ssh root@NEW 'tar xzf - -C /var/gate'
+```
+
 ## Phase 3: stand up the gated brain (Claude Code as the unprivileged user)
 
 Do not attempt to run the brain inside a sealed agent sandbox such as Claude Science. That path was investigated exhaustively in the reference deployment and abandoned: such sandboxes are engineered to prevent an agent from reaching a local service, and every route to the gate (privilege elevation, private-IP or non-standard-port connections, ephemeral tunnels, and single-sign-on-gated hostnames) is blocked by design. The correct runtime is an ordinary process running as the unprivileged user, where isolation is provided by the kernel and the local bridge works directly.
@@ -75,7 +92,7 @@ sudo -u cs-gated bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
 # workspace /home/cs-gated/analysis with CLAUDE.md + symlinks to the dictionary and results
 ```
 
-Install the operator launchers so the analyst can be started reproducibly: `claude-arivale` for an interactive session in the VM terminal, and `claude-arivale-remote` for a persistent, reattachable `tmux` session. The launchers become the brain user, enter the workspace, and start Claude Code. The operator authenticates Claude Code once, interactively, under the account that should own usage of the analyst.
+Install the operator launchers and the data-lock helper from the repository's `provision/bin` directory. In the reference deployment these are `claude-arivale` for an interactive session in the VM terminal and `claude-arivale-remote` for a persistent, reattachable `tmux` session; the names are cosmetic and may be changed for a different dataset. Each launcher becomes the brain user, enters the workspace, and starts Claude Code. The operator authenticates Claude Code once, interactively, under the account that should own usage of the analyst; because the isolation and the gate are enforced beneath the runtime, that account determines only who may drive the analyst and where usage is billed, never whether raw data can be reached.
 
 ## Verification checklist
 
