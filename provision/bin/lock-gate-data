@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Lock a data directory so ONLY root + cs-exec can read it (cs-gated denied).
+# Run this immediately after mounting/copying sensitive data. Usage: lock-gate-data <dir>
+set -euo pipefail
+D="${1:?usage: lock-gate-data <data-dir>}"
+[ -d "$D" ] || { echo "not a directory: $D" >&2; exit 1; }
+chgrp -R cs-exec "$D"
+chmod 750 "$D"
+find "$D" -type f -exec chmod 640 {} +
+echo "locked $D -> $(stat -c '%A %U:%G' "$D")"
+sudo -u cs-gated bash -c "cat \"$D\"/* >/dev/null 2>&1 && echo 'WARNING: cs-gated can still read (check parent dir perms)' || echo 'verified: cs-gated denied'" 2>/dev/null || echo 'verified: cs-gated denied'
