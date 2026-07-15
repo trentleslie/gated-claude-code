@@ -29,7 +29,10 @@ def _interpreter_binds():
     binds, seen = [], set()
     for candidate in (sys.prefix, sys.base_prefix, os.path.dirname(os.path.realpath(sys.executable))):
         real = os.path.realpath(candidate)
-        if real in seen or real.startswith(already) or not os.path.exists(real):
+        # path-boundary-aware: real=="/usr" or real under "/usr/" should be skipped, but
+        # real=="/usrlocal" must NOT false-match "/usr" via a naive startswith().
+        if real in seen or any(real == c or real.startswith(c + os.sep) for c in already) \
+                or not os.path.exists(real):
             continue
         seen.add(real)
         binds += ["--ro-bind", real, real]
@@ -75,9 +78,15 @@ def _quarantine(full, rel, queue_dir, sh):
 def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAULTS):
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
     audit = AuditLog(audit_path)
+    # env for launching bwrap itself / the no-sandbox fallback; the sandboxed child's env
+    # is set entirely by --clearenv + --setenv in _child_command
     env = {"OUTPUT_DIR": out_dir, "DATA_DIR": data_dir,
            "PATH": os.environ.get("PATH", ""), "HOME": out_dir}
     sh = _hash(script_path)
+    if os.environ.get("GATED_CS_REQUIRE_SANDBOX") == "1" and not _sandbox_available():
+        audit.record({"script_hash": sh, "verdict": "error",
+                      "reason": "sandbox required but bubblewrap unavailable"})
+        return {"status": "error", "outputs": [], "message": "sandbox required but unavailable"}
     cmd = _child_command(script_path, data_dir, out_dir)
     try:
         proc = subprocess.run(cmd, env=env, cwd=out_dir,
