@@ -52,7 +52,11 @@ def profile_column(series, name="", thresholds=DEFAULTS):
         out["histogram"] = _histogram(series, thresholds)
     else:
         if out["cardinality"] <= thresholds.cardinality_cap:
-            out["categories"] = sorted(series.dropna().astype(str).unique().tolist())
+            counts = series.dropna().astype(str).value_counts()
+            out["categories"] = sorted(str(v) for v, c in counts.items() if c >= thresholds.k)
+            n_rare = int((counts < thresholds.k).sum())
+            if n_rare:
+                out["rare_categories_suppressed"] = n_rare
         else:
             out["categories"] = None
             out["suppressed_high_cardinality"] = True

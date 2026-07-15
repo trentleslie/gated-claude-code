@@ -51,12 +51,22 @@ def test_histogram_all_bins_suppressed_is_empty():
 def test_categorical_cap_boundary():
     # Same isolation as above: keep cardinality at/over the cap while keeping the
     # uniqueness ratio below Task 4's 0.9 sensitivity threshold via repeats.
-    at_cap = profile_column(pd.Series([f"c{i % 50}" for i in range(60)]))
+    # Each category has >= k=5 rows so k-anonymity suppression doesn't interfere
+    # with this cardinality-cap boundary test.
+    at_cap = profile_column(pd.Series([f"c{i % 50}" for i in range(250)]))
     assert at_cap["categories"] is not None and len(at_cap["categories"]) == 50
-    over_cap = profile_column(pd.Series([f"c{i % 51}" for i in range(60)]))
+    over_cap = profile_column(pd.Series([f"c{i % 51}" for i in range(255)]))
     assert over_cap["categories"] is None and over_cap["suppressed_high_cardinality"] is True
 
 def test_constant_column_emits_no_histogram():
     # a column where every row is identical would pin the shared value via any bin -> emit nothing
     out = profile_column(pd.Series([5.0] * 50))
     assert out["histogram"] == []
+
+def test_rare_categories_suppressed_below_k():
+    # a category with fewer than k rows must not appear in the vocabulary
+    s = pd.Series(["common"] * 95 + ["rare"] * 3 + ["mid"] * 2)  # rare=3, mid=2, both < k=5
+    out = profile_column(s)
+    assert "common" in out["categories"]
+    assert "rare" not in out["categories"] and "mid" not in out["categories"]
+    assert out["rare_categories_suppressed"] == 2
