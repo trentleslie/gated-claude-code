@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# installed at /opt/gate/run-analysis (root:cs-exec, 0750)
+set -euo pipefail
+SCRIPT="$1"
+: "${DATA_DIR:=/data/arivale}"
+OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
+exec bwrap --unshare-net --die-with-parent \
+  --ro-bind /usr /usr --ro-bind /lib /lib --ro-bind /lib64 /lib64 \
+  --ro-bind "$DATA_DIR" "$DATA_DIR" \
+  --bind "$OUT_DIR" "$OUT_DIR" --bind /var/gate/queue /var/gate/queue \
+  --bind /var/gate/audit.jsonl /var/gate/audit.jsonl \
+  --proc /proc --dev /dev --tmpfs /tmp \
+  /usr/bin/env DATA_DIR="$DATA_DIR" \
+  run-analysis "$SCRIPT" --data-dir "$DATA_DIR" --out-dir "$OUT_DIR" \
+    --audit /var/gate/audit.jsonl --queue /var/gate/queue
