@@ -12,6 +12,7 @@ build-dictionary = "gated_cs.profiler.build_dictionary:main"
 build-synthetic = "gated_cs.profiler.build_dictionary:synthetic_main"
 run-analysis = "gated_cs.gate.run_analysis:main"
 gate-review = "gated_cs.gate.review:main"
+gate-api = "gated_cs.service.api:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
