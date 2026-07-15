@@ -1,4 +1,4 @@
-import pandas as pd, pathlib
+import pandas as pd, pathlib, numpy as np
 from gated_cs.profiler.profile import profile_column, profile_file
 FX = pathlib.Path(__file__).parent.parent / "fixtures"
 
@@ -70,3 +70,11 @@ def test_rare_categories_suppressed_below_k():
     assert "common" in out["categories"]
     assert "rare" not in out["categories"] and "mid" not in out["categories"]
     assert out["rare_categories_suppressed"] == 2
+
+def test_histogram_handles_non_finite_values():
+    s = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, np.inf, -np.inf])  # inf must not crash
+    out = profile_column(s)              # must not raise OverflowError
+    hist = out["histogram"]
+    # all emitted bin edges are finite (no inf leaked into the histogram)
+    for b in hist:
+        assert np.isfinite(b["lo"]) and np.isfinite(b["hi"])

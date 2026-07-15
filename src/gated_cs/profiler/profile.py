@@ -1,4 +1,5 @@
 import math
+import numpy as np
 import pandas as pd
 from .parse import parse_file
 from ..config import DEFAULTS
@@ -6,7 +7,7 @@ from ..config import DEFAULTS
 def _nice_step(span, target_bins=10):
     # data-independent "nice" step (1/2/2.5/5 x 10^k) so bin edges are round
     # grid multiples, never exact sample values.
-    if span <= 0:
+    if not math.isfinite(span) or span <= 0:
         return 1.0
     raw = span / target_bins
     mag = 10 ** math.floor(math.log10(raw))
@@ -17,6 +18,7 @@ def _nice_step(span, target_bins=10):
 
 def _histogram(s, thresholds):
     s = s.dropna()
+    s = s[np.isfinite(s)]          # drop inf/-inf — cannot be binned, and break edge math
     if s.empty:
         return []
     if s.nunique() < 2:
