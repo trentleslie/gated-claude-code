@@ -50,3 +50,8 @@ def test_categorical_cap_boundary():
     assert at_cap["categories"] is not None and len(at_cap["categories"]) == 50
     over_cap = profile_column(pd.Series([f"c{i}" for i in range(51)]))
     assert over_cap["categories"] is None and over_cap["suppressed_high_cardinality"] is True
+
+def test_constant_column_emits_no_histogram():
+    # a column where every row is identical would pin the shared value via any bin -> emit nothing
+    out = profile_column(pd.Series([5.0] * 50))
+    assert out["histogram"] == []

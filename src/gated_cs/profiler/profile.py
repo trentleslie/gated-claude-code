@@ -19,6 +19,8 @@ def _histogram(s, thresholds):
     s = s.dropna()
     if s.empty:
         return []
+    if s.nunique() < 2:
+        return []  # constant column: any bin would pin the shared value; nothing safe to bin
     lo_v, hi_v = float(s.min()), float(s.max())
     step = _nice_step(hi_v - lo_v)
     start = math.floor(lo_v / step) * step
