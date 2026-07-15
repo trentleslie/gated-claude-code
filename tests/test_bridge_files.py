@@ -6,10 +6,16 @@ def test_sudoers_is_narrow():
     assert "cs-gated ALL=(cs-exec) NOPASSWD: /opt/gate/run-analysis" in txt
     assert "ALL=(ALL)" not in txt
 
-def test_run_analysis_wrapper_has_no_network_and_ro_data():
+def test_run_analysis_wrapper_pins_trusted_paths():
     txt = (P / "run-analysis-wrapper").read_text()
-    assert "--unshare-net" in txt
-    assert "--ro-bind" in txt and "DATA_DIR" in txt
+    # sandbox now lives inside run_analysis, around only the child script; this
+    # wrapper's job is to pin the trusted paths so cs-gated cannot override them.
+    assert "bwrap" not in txt
+    assert "DATA_DIR=/data/arivale" in txt
+    assert ":=" not in txt  # not overridable via env
+    assert "--audit /var/gate/audit.jsonl" in txt
+    assert "--queue" in txt
+    assert "run-analysis" in txt
 
 def test_submit_calls_sudo_cs_exec():
     txt = (P / "submit-analysis").read_text()

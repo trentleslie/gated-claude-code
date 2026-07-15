@@ -16,6 +16,54 @@ def _iter_artifacts(out_dir):
             full = os.path.join(root, name)
             yield full, os.path.relpath(full, out_dir)
 
+def _sandbox_available():
+    return shutil.which("bwrap") is not None and os.environ.get("GATED_CS_NO_SANDBOX") != "1"
+
+def _interpreter_binds():
+    # The interpreter running us may live outside /usr,/bin,/lib,/lib64,/etc — e.g. a
+    # project venv (uv/.venv) whose python is a symlink into a uv-managed base install
+    # under ~/.local/share/uv. Without these, the sandboxed child can't import stdlib
+    # or any installed package (pandas, etc.) even though it's the *same* interpreter
+    # the gate itself is running under. Bind each real, non-system prefix read-only.
+    already = ("/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc")
+    binds, seen = [], set()
+    for candidate in (sys.prefix, sys.base_prefix, os.path.dirname(os.path.realpath(sys.executable))):
+        real = os.path.realpath(candidate)
+        if real in seen or real.startswith(already) or not os.path.exists(real):
+            continue
+        seen.add(real)
+        binds += ["--ro-bind", real, real]
+    return binds
+
+def _child_command(script_path, data_dir, out_dir):
+    py = sys.executable
+    if not _sandbox_available():
+        return [py, script_path]
+    return [
+        "bwrap",
+        "--unshare-net", "--unshare-pid", "--new-session", "--die-with-parent", "--clearenv",
+        "--ro-bind", "/usr", "/usr",
+        "--ro-bind-try", "/bin", "/bin",
+        "--ro-bind-try", "/sbin", "/sbin",
+        "--ro-bind-try", "/lib", "/lib",
+        "--ro-bind-try", "/lib64", "/lib64",
+        "--ro-bind-try", "/etc", "/etc",
+        *_interpreter_binds(),
+        "--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp",
+        # bind these AFTER --tmpfs /tmp: in dev/test data_dir/out_dir/script_path can be
+        # nested under /tmp, and bwrap applies mounts in order, so a later specific bind
+        # must win over the earlier tmpfs to stay visible in the sandbox.
+        "--ro-bind-try", data_dir, data_dir,   # real data: READ-ONLY (tolerate absence — not
+                                                # every run touches DATA_DIR, e.g. in tests)
+        "--ro-bind", script_path, script_path, # the submitted script: readable in sandbox
+        "--bind", out_dir, out_dir,            # ONLY writable path
+        "--setenv", "OUTPUT_DIR", out_dir,
+        "--setenv", "DATA_DIR", data_dir,
+        "--setenv", "PATH", os.environ.get("PATH", "/usr/bin:/bin"),
+        "--setenv", "HOME", "/tmp",
+        py, script_path,
+    ]
+
 def _quarantine(full, rel, queue_dir, sh):
     # unique flat destination so no two quarantined artifacts (across runs OR within a
     # run via path-flattening) can overwrite each other; queue_dir stays flat for review.
@@ -30,8 +78,9 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, thresholds=DEFAUL
     env = {"OUTPUT_DIR": out_dir, "DATA_DIR": data_dir,
            "PATH": os.environ.get("PATH", ""), "HOME": out_dir}
     sh = _hash(script_path)
+    cmd = _child_command(script_path, data_dir, out_dir)
     try:
-        proc = subprocess.run([sys.executable, script_path], env=env, cwd=out_dir,
+        proc = subprocess.run(cmd, env=env, cwd=out_dir,
                               capture_output=True, text=True, timeout=120)
     except subprocess.TimeoutExpired:
         audit.record({"script_hash": sh, "verdict": "error", "reason": "timeout"})
