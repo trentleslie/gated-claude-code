@@ -1,0 +1,16 @@
+[project]
+name = "gated-cs"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = ["pandas>=2.0"]  # ACRO deferred to a later hardening pass; v1 uses deterministic SDC rules
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+build-dictionary = "gated_cs.profiler.build_dictionary:main"
+run-analysis = "gated_cs.gate.run_analysis:main"
+gate-review = "gated_cs.gate.review:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
