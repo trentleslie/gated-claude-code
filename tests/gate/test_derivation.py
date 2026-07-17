@@ -48,3 +48,23 @@ def test_persist_layer_rejects_missing_join_key(tmp_path):
         assert False, "should reject"
     except DerivationError:
         pass
+
+def test_derivation_persists_layer_and_releases_quality(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATED_CS_NO_SANDBOX", "1")
+    data = tmp_path/"data"; data.mkdir()
+    store = tmp_path/"store"; store.mkdir()
+    out = tmp_path/"out"; q = tmp_path/"q"; res = tmp_path/"res"; audit = tmp_path/"a.jsonl"
+    script = str(tmp_path/"d.py")
+    open(script,"w").write(
+        "import os,pandas as pd\n"
+        "df=pd.DataFrame({'public_client_id':['SYNTH_%04d'%i for i in range(10)],'imp':[float(i) for i in range(10)]})\n"
+        "df.to_csv(os.path.join(os.environ['LAYER_DIR'],'data.tsv.gz'),sep='\\t',index=False,compression='gzip')\n"
+        "pd.DataFrame({'metric':['cv_r2'],'value':[0.45]}).to_csv(os.path.join(os.environ['OUTPUT_DIR'],'quality.csv'),index=False)\n")
+    r = run(script, str(data), str(out), str(audit), str(q), results_dir=str(res),
+            layer_dir=str(tmp_path/"stage"), layer_name="imp_layer",
+            derived_dir=str(store))
+    assert r["status"] == "released"                       # quality aggregate released
+    assert (store/"imp_layer"/"MANIFEST.json").exists()    # layer persisted
+    import json
+    verdicts = [json.loads(l)["verdict"] for l in open(audit)]
+    assert "derivation" in verdicts

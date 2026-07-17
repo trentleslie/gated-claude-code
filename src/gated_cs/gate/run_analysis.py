@@ -3,6 +3,7 @@ import pandas as pd
 from .sdc import check_table
 from .scrub import scrub
 from .audit import AuditLog
+from .derive import persist_layer, DerivationError
 from ..config import DEFAULTS
 
 def _hash(path):
@@ -98,6 +99,8 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
     if results_dir is not None:
         os.makedirs(results_dir, exist_ok=True)
+    if layer_dir:
+        os.makedirs(layer_dir, exist_ok=True)
     audit = AuditLog(audit_path)
     # env for launching bwrap itself / the no-sandbox fallback; the sandboxed child's env
     # is set entirely by --clearenv + --setenv in _child_command
@@ -158,6 +161,18 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
     # always record a run-level entry so no successful run is trace-less
     audit.record({"script_hash": sh, "verdict": "run",
                   "released": len(released), "queued": len(queued)})
+
+    if layer_dir and layer_name and results_dir is not None:
+        store_dir = derived_dir or os.path.dirname(layer_dir)
+        try:
+            man = persist_layer(layer_dir, store_dir, layer_name, script_path=script_path,
+                                data_dir=data_dir, derived_dir=derived_dir, params={},
+                                fit_quality={"released_aggregates": len(released)})
+            audit.record({"script_hash": sh, "verdict": "derivation", "layer": layer_name,
+                          "n_persons": man["n_persons"], "data_hash": man["data_hash"]})
+        except DerivationError as e:
+            audit.record({"script_hash": sh, "verdict": "derivation_rejected", "reason": scrub(str(e))})
+
     status = "queued" if queued else "released"
     return {"status": status, "outputs": released,
             "message": f"{len(released)} released, {len(queued)} queued"}
@@ -167,8 +182,12 @@ def main():
     for arg in ("script", "--data-dir", "--out-dir", "--audit", "--queue"):
         ap.add_argument(arg)
     ap.add_argument("--results", default=None)
+    ap.add_argument("--derived-dir", default=None)
+    ap.add_argument("--layer-dir", default=None)
+    ap.add_argument("--layer-name", default=None)
     a = ap.parse_args()
-    r = run(a.script, a.data_dir, a.out_dir, a.audit, a.queue, results_dir=a.results)
+    r = run(a.script, a.data_dir, a.out_dir, a.audit, a.queue, results_dir=a.results,
+            derived_dir=a.derived_dir, layer_dir=a.layer_dir, layer_name=a.layer_name)
     print(r["message"]); sys.exit(0 if r["status"] != "error" else 1)
 
 if __name__ == "__main__":
