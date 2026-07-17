@@ -17,3 +17,34 @@ def test_analysis_can_read_derived_dir(tmp_path, monkeypatch):
         "pd.DataFrame({'metric':['rows'],'value':[n]}).to_csv(os.path.join(os.environ['OUTPUT_DIR'],'r.csv'),index=False)\n")
     r = run(script, str(data), str(out), str(audit), str(q), results_dir=str(res), derived_dir=str(derived))
     assert r["status"] == "released"
+
+import json
+from gated_cs.gate.derive import persist_layer, DerivationError
+
+def _stage_matrix(d, ids=("SYNTH_0001","SYNTH_0002")):
+    d.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame({"public_client_id":list(ids),"score":[1.0,2.0]}).to_csv(d/"data.tsv.gz", sep="\t", index=False, compression="gzip")
+
+def test_persist_layer_writes_manifest_and_moves(tmp_path):
+    stage = tmp_path/"stage"; _stage_matrix(stage)
+    store = tmp_path/"store"; store.mkdir()
+    script = tmp_path/"s.py"; script.write_text("print(1)")
+    m = persist_layer(str(stage), str(store), "layerX", script_path=str(script),
+                      data_dir=str(tmp_path/"data"), derived_dir=None,
+                      params={"seed":0}, fit_quality={"cv_r2":0.45})
+    assert (store/"layerX"/"MANIFEST.json").exists()
+    man = json.loads((store/"layerX"/"MANIFEST.json").read_text())
+    assert man["name"]=="layerX" and man["fit_quality"]["cv_r2"]==0.45
+    assert "script_hash" in man and "data_hash" in man and "created_utc" in man
+    assert (store/"layerX"/"PROVENANCE.jsonl").exists()
+
+def test_persist_layer_rejects_missing_join_key(tmp_path):
+    stage = tmp_path/"stage"; stage.mkdir()
+    pd.DataFrame({"nope":[1,2]}).to_csv(stage/"data.tsv.gz", sep="\t", index=False, compression="gzip")
+    store = tmp_path/"store"; store.mkdir(); s = tmp_path/"s.py"; s.write_text("x")
+    try:
+        persist_layer(str(stage), str(store), "bad", script_path=str(s), data_dir="d",
+                      derived_dir=None, params={}, fit_quality={})
+        assert False, "should reject"
+    except DerivationError:
+        pass
