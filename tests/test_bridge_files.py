@@ -22,3 +22,9 @@ def test_submit_copies_into_shared_incoming_then_sudo():
     txt = (P / "submit-analysis").read_text()
     assert "/var/gate/incoming" in txt
     assert "exec sudo -u cs-exec /opt/gate/run-analysis" in txt
+
+def test_submit_derivation_validates_layer_name():
+    import subprocess, sys
+    p = subprocess.run(["bash", "provision/submit-derivation", "x.py", "--layer", "bad;name"],
+                       capture_output=True, text=True)
+    assert p.returncode == 2 and "layer name" in p.stderr

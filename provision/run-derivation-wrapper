@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# installed at /opt/gate/run-derivation (root:cs-exec, 0750). Runs as cs-exec.
+set -euo pipefail
+SCRIPT="$1"; LAYER="$2"                        # $2 = --layer value (validated by submit-derivation)
+DATA_DIR=/data/arivale
+DERIVED_DIR=/var/gate/derived
+OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
+LAYER_DIR="$(mktemp -d /var/gate/layerstage.XXXXXX)"
+exec env -i PATH=/opt/gated-cs/bin:/usr/local/bin:/usr/bin:/bin GATED_CS_REQUIRE_SANDBOX=1 \
+  run-analysis "$SCRIPT" --data-dir "$DATA_DIR" --out-dir "$OUT_DIR" \
+    --audit /var/gate/audit.jsonl --queue /var/gate/queue --results /var/gate/results \
+    --derived-dir "$DERIVED_DIR" --layer-dir "$LAYER_DIR" --layer-name "$LAYER" \
+    --dict /var/gate/dict/dictionary.json

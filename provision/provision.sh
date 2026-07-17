@@ -44,6 +44,8 @@ chown cs-exec:cs-exec /var/gate/audit.jsonl;   chmod 0600 /var/gate/audit.jsonl 
 chown cs-exec:cs-exec /var/gate/queue;         chmod 0700 /var/gate/queue          # quarantine: cs-exec only
 chown cs-gated:csbridge /var/gate/incoming;    chmod 2750 /var/gate/incoming       # scripts in  (cs-gated -> cs-exec)
 chown cs-exec:csbridge  /var/gate/results;     chmod 2750 /var/gate/results        # results out (cs-exec -> cs-gated)
+mkdir -p /var/gate/derived
+chown cs-exec:cs-exec /var/gate/derived; chmod 0700 /var/gate/derived   # derived store: cs-exec ONLY
 chown cs-exec:csbridge  /var/gate;             chmod 0710 /var/gate                # traversable by group, not listable
 
 echo "== 6. install the package into a venv (provides run-analysis / build-dictionary / gate-review) =="
@@ -54,6 +56,8 @@ python3 -m venv /opt/gated-cs
 echo "== 7. bridge: submit-analysis (cs-gated), the wrapper (root:cs-exec 0750), narrow sudoers =="
 install -m 0755 "$SRC/provision/submit-analysis" /usr/local/bin/submit-analysis
 install -o root -g cs-exec -m 0750 "$SRC/provision/run-analysis-wrapper" /opt/gate/run-analysis
+install -m 0755 "$SRC/provision/submit-derivation" /usr/local/bin/submit-derivation
+install -o root -g cs-exec -m 0750 "$SRC/provision/run-derivation-wrapper" /opt/gate/run-derivation
 install -m 0440 "$SRC/provision/sudoers.d/cs-gated" /etc/sudoers.d/cs-gated
 visudo -cf /etc/sudoers.d/cs-gated
 

@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[ $# -eq 3 ] && [ "$2" = "--layer" ] || { echo "usage: submit-derivation <script.py> --layer <name>" >&2; exit 2; }
+case "$3" in *[!a-zA-Z0-9_-]*) echo "layer name must be [A-Za-z0-9_-]" >&2; exit 2;; esac
+src="$(realpath "$1")"; dest="/var/gate/incoming/$(id -un)-$$-$(basename "$src")"
+cp -- "$src" "$dest"; chmod 0640 "$dest"
+exec sudo -u cs-exec /opt/gate/run-derivation "$dest" "$3"

@@ -1,1 +1,2 @@
 cs-gated ALL=(cs-exec) NOPASSWD: /opt/gate/run-analysis
+cs-gated ALL=(cs-exec) NOPASSWD: /opt/gate/run-derivation
