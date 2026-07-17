@@ -62,6 +62,8 @@ Point the executor at that directory. The bridge wrapper hard-codes the data pat
 sudo -u cs-exec /opt/gated-cs/bin/build-dictionary /path/to/data --out /var/gate/dict
 ```
 
+This step reads the raw data, and it is the one point in the build where a defect can tempt an operator to inspect raw values directly. An agent following this guide must not run the profiler or any data-touching command itself and must not open the raw files, because a raw value can reach a model's context through a stack trace or a printed row; instead, the agent instructs the human operator to run the profiling and audit commands as the data-owning user and to relay back only the non-disclosive outputs, namely the dictionary, the row and column counts, and the leak-audit findings. When the profiler fails on a dataset-specific edge case, the fix is developed from the column name, the error type, and the audit finding the operator reports, not from raw data placed in the model's context. This keeps the guarantee that no model reads a raw record intact through the construction of the dictionary, exactly as it holds when the live agent runs.
+
 The profiler emits `dictionary.json`, `dictionary.md`, and `synthetic_samples/`. Audit the dictionary before it is delivered to the brain: confirm it contains no raw minimum or maximum keys, no known participant identifier, and no leaked dates, identifiers, or email addresses, and that identifier and date columns are flagged sensitive with their values suppressed. Real data commonly surfaces parsing edge cases; the reference deployment required handling non-finite numeric values, a header column whose name began with the comment character, and date columns that needed Safe-Harbor suppression. Treat any anomaly the audit reports as a defect to fix, not to wave through.
 
 Generate the relational synthetic surface from the audited dictionary, which reads only the dictionary and never the raw data, and deliver both to the brain's readable location.
@@ -94,6 +96,20 @@ sudo -u cs-gated bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
 
 Install the operator launchers and the data-lock helper from the repository's `provision/bin` directory. In the reference deployment these are `claude-arivale` for an interactive session in the VM terminal and `claude-arivale-remote` for a persistent, reattachable `tmux` session; the names are cosmetic and may be changed for a different dataset. Each launcher becomes the brain user, enters the workspace, and starts Claude Code. The operator authenticates Claude Code once, interactively, under the account that should own usage of the analyst; because the isolation and the gate are enforced beneath the runtime, that account determines only who may drive the analyst and where usage is billed, never whether raw data can be reached.
 
+## Surfacing the analyst's workspace in JupyterLab (optional)
+
+A managed JupyterLab commonly runs on the same virtual machine, rooted at a shared working directory and executing with elevated privilege; in the reference fleet it runs as root, rooted at `/procedure`, on machines that also carry ordinary human accounts. An operator benefits from seeing the agent's scripts and released results inside that familiar environment and running them there against the real data. The workspace is exposed through a strictly one-way live mirror, never a shared or two-way folder.
+
+The direction is the safeguard, not a convenience. The agent's workspace is non-disclosive by construction: it holds only the scripts the agent writes, the dictionary, the synthetic samples, and gate-cleared results, because the agent cannot read a raw record to deposit one there. Mirroring that workspace outward into the JupyterLab tree therefore exposes nothing that was not already safe. A shared or two-way folder would invert the risk: the agent could read anything a privileged process placed in the folder, and on a multi-user machine whose JupyterLab runs as root, that is a path by which a raw-data extract could reach the model and silently defeat the gate. A one-way mirror carries the agent's files out while admitting nothing back into the agent's readable space.
+
+The mirror is a small service that watches the workspace with `inotify` and re-synchronizes it to the JupyterLab directory on every change, so a script the agent writes appears in JupyterLab within a second or two. The mirrored copy is a read-only view: the synchronization overwrites it, so an edit made on the JupyterLab side does not persist and must be copied elsewhere to be kept. An authorized human may open and run the agent's scripts against the real data there, outside the gate, because the party the gate isolates is the model, not a person who already holds data-use authorization.
+
+```bash
+# one-way live mirror (systemd, reboot-safe): agent workspace -> /procedure view
+# on every inotify event under the workspace:
+rsync -a --delete /home/cs-gated/analysis/ /procedure/claude-analysis/
+```
+
 ## Verification checklist
 
 - The brain user is denied read access to the raw data, and reading it returns permission-denied.
@@ -101,6 +117,7 @@ Install the operator launchers and the data-lock helper from the repository's `p
 - A clean aggregate submitted through the bridge is released and delivered to the results directory.
 - A row-level dump is quarantined; a group with fewer than five members is suppressed; a submitted script that attempts to open the audit log or a network socket produces neither tampering nor a connection.
 - Every submission appears in the append-only audit log with its script hash and verdict.
+- If the JupyterLab mirror is enabled, a newly written script appears under the mirror directory within seconds, and a file written on the JupyterLab side does not propagate back into the brain's workspace.
 
 ## Operating the analyst
 
