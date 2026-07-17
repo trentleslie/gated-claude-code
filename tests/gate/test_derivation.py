@@ -68,3 +68,33 @@ def test_derivation_persists_layer_and_releases_quality(tmp_path, monkeypatch):
     import json
     verdicts = [json.loads(l)["verdict"] for l in open(audit)]
     assert "derivation" in verdicts
+
+def test_derivation_without_store_fails_closed(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATED_CS_NO_SANDBOX", "1")
+    data = tmp_path/"data"; data.mkdir()
+    out = tmp_path/"out"; q = tmp_path/"q"; res = tmp_path/"res"; audit = tmp_path/"a.jsonl"
+    layer_dir = tmp_path/"stage"
+    script = str(tmp_path/"d.py")
+    open(script,"w").write(
+        "import os,pandas as pd\n"
+        "df=pd.DataFrame({'public_client_id':['SYNTH_%04d'%i for i in range(10)],'imp':[float(i) for i in range(10)]})\n"
+        "df.to_csv(os.path.join(os.environ['LAYER_DIR'],'data.tsv.gz'),sep='\\t',index=False,compression='gzip')\n"
+        "pd.DataFrame({'metric':['cv_r2'],'value':[0.45]}).to_csv(os.path.join(os.environ['OUTPUT_DIR'],'quality.csv'),index=False)\n")
+    # No derived_dir configured -- must fail closed, not fall back to persisting
+    # the derived matrix next to the ephemeral staging dir.
+    r = run(script, str(data), str(out), str(audit), str(q), results_dir=str(res),
+            layer_dir=str(layer_dir), layer_name="imp_layer", derived_dir=None)
+
+    # (a) nothing persisted to a fallback location: no MANIFEST.json anywhere
+    # under the staging dir's parent or the staging dir itself.
+    for root, _dirs, files in os.walk(tmp_path):
+        assert "MANIFEST.json" not in files, f"unexpected MANIFEST.json under {root}"
+
+    # (b) audit log records the rejection
+    verdicts = [json.loads(l) for l in open(audit)]
+    rejected = [v for v in verdicts if v.get("verdict") == "derivation_rejected"]
+    assert len(rejected) == 1
+    assert rejected[0]["reason"] == "no derived store configured"
+
+    # (c) the run did not crash -- the quality aggregate still released
+    assert r["status"] == "released"
