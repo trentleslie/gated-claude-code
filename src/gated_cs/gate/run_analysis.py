@@ -95,7 +95,8 @@ def _deliver(df_or_path, rel, results_dir, sh):
     return dest
 
 def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
-        derived_dir=None, layer_dir=None, layer_name=None, thresholds=DEFAULTS):
+        derived_dir=None, layer_dir=None, layer_name=None, thresholds=DEFAULTS,
+        dict_path=None):
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
     if results_dir is not None:
         os.makedirs(results_dir, exist_ok=True)
@@ -177,6 +178,11 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
                                     fit_quality={"released_aggregates": len(released)})
                 audit.record({"script_hash": sh, "verdict": "derivation", "layer": layer_name,
                               "n_persons": man["n_persons"], "data_hash": man["data_hash"]})
+                if dict_path and os.path.exists(dict_path):
+                    from ..profiler.build_dictionary import add_layer_to_dictionary
+                    from .derive import read_layer_frame
+                    dfl = read_layer_frame(os.path.join(derived_dir, layer_name, man["data_file"]))
+                    add_layer_to_dictionary(dict_path, os.path.dirname(dict_path), layer_name, dfl)
             except DerivationError as e:
                 audit.record({"script_hash": sh, "verdict": "derivation_rejected", "reason": scrub(str(e))})
 
@@ -192,9 +198,11 @@ def main():
     ap.add_argument("--derived-dir", default="/var/gate/derived")
     ap.add_argument("--layer-dir", default=None)
     ap.add_argument("--layer-name", default=None)
+    ap.add_argument("--dict", default="/var/gate/dict/dictionary.json")
     a = ap.parse_args()
     r = run(a.script, a.data_dir, a.out_dir, a.audit, a.queue, results_dir=a.results,
-            derived_dir=a.derived_dir, layer_dir=a.layer_dir, layer_name=a.layer_name)
+            derived_dir=a.derived_dir, layer_dir=a.layer_dir, layer_name=a.layer_name,
+            dict_path=a.dict)
     print(r["message"]); sys.exit(0 if r["status"] != "error" else 1)
 
 if __name__ == "__main__":

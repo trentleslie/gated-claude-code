@@ -98,3 +98,26 @@ def test_derivation_without_store_fails_closed(tmp_path, monkeypatch):
 
     # (c) the run did not crash -- the quality aggregate still released
     assert r["status"] == "released"
+
+def test_derivation_autoprofiles_and_screens_sensitive(tmp_path, monkeypatch):
+    monkeypatch.setenv("GATED_CS_NO_SANDBOX", "1")
+    data = tmp_path/"data"; data.mkdir()
+    dictdir = tmp_path/"dict";
+    from gated_cs.profiler.build_dictionary import build
+    (data/"chem.csv").write_text("public_client_id,glucose\nSYNTH_0001,90\nSYNTH_0002,95\n")
+    build(str(data), str(dictdir))
+    store = tmp_path/"store"; store.mkdir()
+    out=tmp_path/"o"; q=tmp_path/"q"; res=tmp_path/"r"; audit=tmp_path/"a.jsonl"
+    script=str(tmp_path/"d.py")
+    open(script,"w").write(
+        "import os,pandas as pd\n"
+        "df=pd.DataFrame({'public_client_id':['SYNTH_%04d'%i for i in range(8)],"
+        "'imp':[float(i) for i in range(8)],'birth_date':['1980-01-01']*8})\n"
+        "df.to_csv(os.path.join(os.environ['LAYER_DIR'],'data.tsv.gz'),sep='\\t',index=False,compression='gzip')\n"
+        "pd.DataFrame({'metric':['cv_r2'],'value':[0.5]}).to_csv(os.path.join(os.environ['OUTPUT_DIR'],'q.csv'),index=False)\n")
+    run(script,str(data),str(out),str(audit),str(q),results_dir=str(res),
+        layer_dir=str(tmp_path/"stage"),layer_name="imp_layer",derived_dir=str(store),
+        dict_path=str(dictdir/"dictionary.json"))
+    import json; d=json.loads((dictdir/"dictionary.json").read_text())
+    assert d["files"]["imp_layer"]["derived"] is True
+    assert d["files"]["imp_layer"]["columns"]["birth_date"]["sensitive"] is True  # re-encoded date screened
