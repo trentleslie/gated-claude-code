@@ -1,5 +1,7 @@
 # Gated Claude Code for Arivale: A PHI-Safe Code-to-Data Analysis Agent
 
+[https://docs.google.com/presentation/d/1vYH7puXKgkqN2xxaq2t9EiSwgWDNollpb-eGkFvrqyw/edit?usp=sharing](https://docs.google.com/presentation/d/1vYH7puXKgkqN2xxaq2t9EiSwgWDNollpb-eGkFvrqyw/edit?usp=sharing)
+
 ## Key takeaways
 
 * An LLM agent computes results on the real Arivale cohort **without ever reading a raw record**: it sees only a disclosure-safe data dictionary and fabricated synthetic samples, while a separate privileged executor runs its scripts against the real data and returns only disclosure-checked aggregates.
@@ -7,6 +9,7 @@
 * **The guarantee holds at every stage, the dictionary's own construction included:** the deterministic profiler was developed against synthetic fixtures and run on the real data by a human operator who relayed back only non-disclosive outputs, so no model ever saw the rows it describes.
 * **The system is live and reproduced identically across three virtual machines.** The first cross-table result, mean fasting glucose by sex, was physiologically plausible and identical on all three (see Validation).
 * **It is a reusable template, not a one-off.** The profiler, gate, and bridge are dataset-agnostic; a different backend needs only a re-pointed executor and a regenerated dictionary, and an identical-dataset instance needs only the scripts plus a copy of the audited dictionary.
+* **The boundary is extensible, not just queryable.** A `submit-derivation` verb lets the agent compute per-person derived features (imputation, biological-age or uniqueness scores, metabolite ratios) and persist them inside the boundary for reuse, while only fit-quality aggregates are released. It was proven live with a metabolite-imputation layer that a later analysis reused, the model never touching a derived row.
 * **The sharpest lesson concerns runtime.** Claude Science, our first choice, is sandboxed to prevent an agent from reaching any local service, which is precisely the capability a gated agent requires, so we pivoted to Claude Code running as the unprivileged user, where the kernel provides isolation and the local bridge works directly.
 
 ## The problem
@@ -76,6 +79,27 @@ The architecture was reproduced on two further virtual machines, each serving th
 ## Working alongside JupyterLab
 
 Each machine also runs a managed JupyterLab as root over the shared `/procedure` tree, and the analyst's workspace is surfaced there through a strictly one-way live mirror, so an operator can open and run the agent's scripts against the real data in a familiar environment. The direction is load-bearing: the workspace holds only non-disclosive artifacts and is mirrored outward, while nothing written on the JupyterLab side flows back into the agent's readable space. A two-way share would let the model read whatever a privileged process placed in the folder, which on a root-run, multi-user notebook server is a route by which a raw extract could reach the model; the mirror is therefore one-way and read-only. The model's output becomes visible to its human supervisors without weakening the boundary.
+
+## A derived-data layer
+
+The same boundary that runs one-off analyses also supports building on them. A second verb,
+`submit-derivation`, lets the agent compute per-person derived features — imputed metabolite values,
+biological-age or uniqueness scores, metabolite ratios — and persist them inside the boundary for reuse,
+while only fit-quality aggregates are released. The derived matrix is written to a store owned solely by
+the data-owning user and unreadable by the model (mode 0700), so a per-person derived value, which is
+itself protected health information, never leaves as a row. Each layer is auto-profiled into the
+dictionary and synthetic surface, so the model develops against it exactly as it does a raw table, and a
+later analysis reads the layer and joins it to raw tables on the participant key.
+
+Three properties keep the extension safe. The writable path a derivation uses is separate from the
+release path: the derived matrix goes to the store and is never gate-checked or delivered, while the
+fit-quality outputs pass through the unchanged disclosure gate. Provenance for each layer is written by
+the executor, not the model's code, so it cannot be forged. And derived columns inherit the profiler's
+sensitivity screening, so a feature that re-encodes an identifier or a date is suppressed like a raw one.
+The design was proven live: an imputation derivation persisted a forty-metabolite per-person layer
+(cross-validated R-squared of approximately 0.22), the layer appeared in the dictionary tagged as
+derived, and a separate analysis then read it and released mean imputed-metabolite levels rising
+monotonically across fasting-glucose tertiles, with the model never exposed to a raw or a derived row.
 
 ## The runtime lesson
 

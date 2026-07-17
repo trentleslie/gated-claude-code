@@ -35,7 +35,7 @@ Root access is by SSH key. On Access-for-Infrastructure hosts the key is authori
 
 ## Phase 1: provision the boundary (before any data is present, non-disclosive)
 
-Copy the repository to the VM and run the provisioning script as root. It verifies unprivileged user namespaces, installs dependencies, builds bubblewrap from source (the packaged version on Ubuntu 22.04 is 0.6.1, which is too old; the sandbox requires at least 0.8), creates the two users and a shared bridge group, locks the data directory to the data-owning user, wires the gate directories and the sudoers bridge, and installs the package into a virtual environment.
+Copy the repository to the VM and run the provisioning script as root. It verifies unprivileged user namespaces, installs dependencies, builds bubblewrap from source (the packaged version on Ubuntu 22.04 is 0.6.1, which is too old; the sandbox requires at least 0.8), creates the two users and a shared bridge group, locks the data directory to the data-owning user, wires the gate directories (including the `cs-exec`-only derived-feature store), installs the package into a virtual environment, installs both bridge commands (`submit-analysis` and `submit-derivation`) with the narrow sudoers rules, and provisions the analyst's workspace with its orienting `CLAUDE.md` and reference symlinks. A freshly provisioned box is therefore self-contained; the remaining phases only add data and the runtime.
 
 ```bash
 # from your workstation, copy the repo to the VM
@@ -87,14 +87,20 @@ ssh root@SOURCE 'tar czf - -C /var/gate dict' | ssh root@NEW 'tar xzf - -C /var/
 
 Do not attempt to run the brain inside a sealed agent sandbox such as Claude Science. That path was investigated exhaustively in the reference deployment and abandoned: such sandboxes are engineered to prevent an agent from reaching a local service, and every route to the gate (privilege elevation, private-IP or non-standard-port connections, ephemeral tunnels, and single-sign-on-gated hostnames) is blocked by design. The correct runtime is an ordinary process running as the unprivileged user, where isolation is provided by the kernel and the local bridge works directly.
 
-Install Claude Code for the brain user, create its workspace, and orient it with a `CLAUDE.md` that states it cannot read raw data and must submit scripts through `submit-analysis`. The reference workspace symlinks the dictionary, synthetic samples, and results into the brain's directory.
+Provisioning (Phase 1) already created the brain's workspace `/home/cs-gated/analysis`, its orienting `CLAUDE.md` (which states it cannot read raw data and must submit scripts through `submit-analysis`), and the reference symlinks to the dictionary, synthetic samples, and results — the dictionary and synthetic links resolve once Phase 2 builds them. Phase 3 therefore only installs Claude Code for the brain user and authenticates it.
 
 ```bash
 sudo -u cs-gated bash -lc 'curl -fsSL https://claude.ai/install.sh | bash'
-# workspace /home/cs-gated/analysis with CLAUDE.md + symlinks to the dictionary and results
+# workspace + CLAUDE.md + symlinks already provisioned in Phase 1
 ```
 
 Install the operator launchers and the data-lock helper from the repository's `provision/bin` directory. In the reference deployment these are `claude-arivale` for an interactive session in the VM terminal and `claude-arivale-remote` for a persistent, reattachable `tmux` session; the names are cosmetic and may be changed for a different dataset. Each launcher becomes the brain user, enters the workspace, and starts Claude Code. The operator authenticates Claude Code once, interactively, under the account that should own usage of the analyst; because the isolation and the gate are enforced beneath the runtime, that account determines only who may drive the analyst and where usage is billed, never whether raw data can be reached.
+
+## Derived-data layer (optional)
+
+Beyond one-off analyses, the gate supports a second verb, `submit-derivation <script> --layer <name>`, that lets the agent compute per-person derived features — imputed values, biological-age or uniqueness scores, ratios — and persist them inside the boundary for reuse by later analyses, while only fit-quality aggregates are released. The derived matrix lands in a `cs-exec`-owned store the agent cannot read (`/var/gate/derived`, mode 0700); the fit-quality outputs pass through the same disclosure gate; and the new layer is auto-profiled into the dictionary and synthetic surface, so the agent develops against it exactly as it does a raw table. A later `submit-analysis` reads the layer from `$DERIVED_DIR/<name>/data.tsv.gz` — by name, because a layer is a directory that also holds a provenance manifest — and joins it to raw tables on the participant key.
+
+The isolation invariant is unchanged: exactly one identity reads real per-person data, raw or derived, and every value that leaves still passes through the gate. Provenance for each layer is written by the executor, not the agent, so it cannot be forged, and identifier- or date-like derived columns inherit the same sensitivity suppression as raw ones. A per-person derived value is itself protected health information; it is never released as a row, only as gate-checked aggregates.
 
 ## Surfacing the analyst's workspace in JupyterLab (optional)
 
@@ -117,6 +123,7 @@ rsync -a --delete /home/cs-gated/analysis/ /procedure/claude-analysis/
 - A clean aggregate submitted through the bridge is released and delivered to the results directory.
 - A row-level dump is quarantined; a group with fewer than five members is suppressed; a submitted script that attempts to open the audit log or a network socket produces neither tampering nor a connection.
 - Every submission appears in the append-only audit log with its script hash and verdict.
+- A derivation submitted through `submit-derivation` persists a layer the brain user cannot read, releases only its fit-quality aggregate, and appears in the dictionary tagged `derived`; a later analysis can read that layer and join it to a raw table.
 - If the JupyterLab mirror is enabled, a newly written script appears under the mirror directory within seconds, and a file written on the JupyterLab side does not propagate back into the brain's workspace.
 
 ## Operating the analyst
