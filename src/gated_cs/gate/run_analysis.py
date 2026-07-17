@@ -38,11 +38,11 @@ def _interpreter_binds():
         binds += ["--ro-bind", real, real]
     return binds
 
-def _child_command(script_path, data_dir, out_dir):
+def _child_command(script_path, data_dir, out_dir, derived_dir=None, layer_dir=None):
     py = sys.executable
     if not _sandbox_available():
         return [py, script_path]
-    return [
+    cmd = [
         "bwrap",
         "--unshare-net", "--unshare-pid", "--new-session", "--die-with-parent", "--clearenv",
         "--ro-bind", "/usr", "/usr",
@@ -59,6 +59,12 @@ def _child_command(script_path, data_dir, out_dir):
         "--ro-bind-try", data_dir, data_dir,   # real data: READ-ONLY (tolerate absence — not
                                                 # every run touches DATA_DIR, e.g. in tests)
         "--ro-bind", script_path, script_path, # the submitted script: readable in sandbox
+    ]
+    if derived_dir:
+        cmd += ["--ro-bind-try", derived_dir, derived_dir, "--setenv", "DERIVED_DIR", derived_dir]
+    if layer_dir:
+        cmd += ["--bind", layer_dir, layer_dir, "--setenv", "LAYER_DIR", layer_dir]
+    cmd += [
         "--bind", out_dir, out_dir,            # ONLY writable path
         "--setenv", "OUTPUT_DIR", out_dir,
         "--setenv", "DATA_DIR", data_dir,
@@ -66,6 +72,7 @@ def _child_command(script_path, data_dir, out_dir):
         "--setenv", "HOME", "/tmp",
         py, script_path,
     ]
+    return cmd
 
 def _quarantine(full, rel, queue_dir, sh):
     # unique flat destination so no two quarantined artifacts (across runs OR within a
@@ -86,7 +93,8 @@ def _deliver(df_or_path, rel, results_dir, sh):
         df_or_path.to_csv(dest, index=False)   # already-gated (masked) frame
     return dest
 
-def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None, thresholds=DEFAULTS):
+def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
+        derived_dir=None, layer_dir=None, layer_name=None, thresholds=DEFAULTS):
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
     if results_dir is not None:
         os.makedirs(results_dir, exist_ok=True)
@@ -95,12 +103,16 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
     # is set entirely by --clearenv + --setenv in _child_command
     env = {"OUTPUT_DIR": out_dir, "DATA_DIR": data_dir,
            "PATH": os.environ.get("PATH", ""), "HOME": out_dir}
+    if derived_dir:
+        env["DERIVED_DIR"] = derived_dir
+    if layer_dir:
+        env["LAYER_DIR"] = layer_dir
     sh = _hash(script_path)
     if os.environ.get("GATED_CS_REQUIRE_SANDBOX") == "1" and not _sandbox_available():
         audit.record({"script_hash": sh, "verdict": "error",
                       "reason": "sandbox required but bubblewrap unavailable"})
         return {"status": "error", "outputs": [], "message": "sandbox required but unavailable"}
-    cmd = _child_command(script_path, data_dir, out_dir)
+    cmd = _child_command(script_path, data_dir, out_dir, derived_dir=derived_dir, layer_dir=layer_dir)
     try:
         proc = subprocess.run(cmd, env=env, cwd=out_dir,
                               capture_output=True, text=True, timeout=120)
