@@ -61,5 +61,18 @@ install -o root -g cs-exec -m 0750 "$SRC/provision/run-derivation-wrapper" /opt/
 install -m 0440 "$SRC/provision/sudoers.d/cs-gated" /etc/sudoers.d/cs-gated
 visudo -cf /etc/sudoers.d/cs-gated
 
+echo "== 8. cs-gated analysis workspace + orientation (CLAUDE.md, reference symlinks) =="
+install -d -o cs-gated -g cs-gated -m 0755 /home/cs-gated/analysis /home/cs-gated/analysis/analyses
+install -o cs-gated -g cs-gated -m 0644 "$SRC/provision/workspace-CLAUDE.md" /home/cs-gated/analysis/CLAUDE.md
+# reference symlinks; dict/synthetic targets resolve once the dictionary is built (Phase 2)
+for pair in "/var/gate/dict/dictionary.md dictionary.md" \
+            "/var/gate/dict/dictionary.json dictionary.json" \
+            "/var/gate/dict/synthetic_samples synthetic_samples" \
+            "/var/gate/results results"; do
+  set -- $pair
+  ln -sfn "$1" "/home/cs-gated/analysis/$2"
+  chown -h cs-gated:cs-gated "/home/cs-gated/analysis/$2"
+done
+
 echo "Provision complete. /data/arivale is EMPTY and cs-exec-only."
 echo "Next: validate the gate (RUNBOOK), then mount real Arivale data, then build the dictionary."
