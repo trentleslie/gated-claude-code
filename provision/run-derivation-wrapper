@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 # installed at /opt/gate/run-derivation (root:cs-exec, 0750). Runs as cs-exec.
+# Sandbox is INSIDE run-analysis (bubblewrap around the untrusted child only); this
+# wrapper pins trusted paths and scrubs the environment so cs-gated cannot influence
+# execution. DATA_DIR/DERIVED_DIR are hardcoded, never from env/args.
+#
+# submit-derivation validates LAYER before invoking sudo, but the sudoers rule
+# permits this command with any args, so cs-gated could call it directly. LAYER
+# is untrusted input and MUST be re-validated here (trust boundary) -- persist_layer
+# also re-validates, but fail fast before spawning run-analysis.
 set -euo pipefail
-SCRIPT="$1"; LAYER="$2"                        # $2 = --layer value (validated by submit-derivation)
-DATA_DIR=/data/arivale
-DERIVED_DIR=/var/gate/derived
+SCRIPT="$1"; LAYER="$2"                        # $2 = --layer value (untrusted; re-validated below)
+case "$LAYER" in
+  ''|-*|*[!A-Za-z0-9_-]*) echo "invalid layer name" >&2; exit 2;;
+esac
+DATA_DIR=/data/arivale                         # hardcoded, never from env/args
+DERIVED_DIR=/var/gate/derived                  # hardcoded, never from env/args
 OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
 LAYER_DIR="$(mktemp -d /var/gate/layerstage.XXXXXX)"
 exec env -i PATH=/opt/gated-cs/bin:/usr/local/bin:/usr/bin:/bin GATED_CS_REQUIRE_SANDBOX=1 \

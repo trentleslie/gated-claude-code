@@ -1,10 +1,12 @@
-import hashlib, json, os, shutil, glob
+import hashlib, json, os, re, shutil, glob
 from datetime import datetime, timezone
 import pandas as pd
 
 class DerivationError(Exception): pass
 
 JOIN_KEY = "public_client_id"
+
+_SAFE_LAYER = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_-]*$")
 
 def _sha_file(path):
     with open(path, "rb") as f: return hashlib.sha256(f.read()).hexdigest()[:16]
@@ -28,6 +30,8 @@ def _venv_versions():
 
 def persist_layer(layer_stage_dir, store_dir, name, *, script_path, data_dir,
                   derived_dir, params, fit_quality):
+    if not _SAFE_LAYER.match(name):
+        raise DerivationError(f"unsafe layer name: {name!r}")
     src = _stage_data_file(layer_stage_dir)
     df = read_layer_frame(src)
     if JOIN_KEY not in df.columns:

@@ -38,6 +38,21 @@ def test_persist_layer_writes_manifest_and_moves(tmp_path):
     assert "script_hash" in man and "data_hash" in man and "created_utc" in man
     assert (store/"layerX"/"PROVENANCE.jsonl").exists()
 
+def test_persist_layer_rejects_unsafe_names(tmp_path):
+    # The name check must fire before the matrix is even inspected, so stage a
+    # valid matrix and confirm rejection is driven by the name, not the data.
+    stage = tmp_path/"stage"; _stage_matrix(stage)
+    store = tmp_path/"store"; store.mkdir()
+    script = tmp_path/"s.py"; script.write_text("print(1)")
+    for bad in ("../evil", "/etc/cron.d/x", "a/b", "--dict", ""):
+        try:
+            persist_layer(str(stage), str(store), bad, script_path=str(script),
+                          data_dir=str(tmp_path/"data"), derived_dir=None,
+                          params={"seed": 0}, fit_quality={"cv_r2": 0.45})
+            assert False, f"should reject unsafe name {bad!r}"
+        except DerivationError:
+            pass
+
 def test_persist_layer_rejects_missing_join_key(tmp_path):
     stage = tmp_path/"stage"; stage.mkdir()
     pd.DataFrame({"nope":[1,2]}).to_csv(stage/"data.tsv.gz", sep="\t", index=False, compression="gzip")
