@@ -1,5 +1,5 @@
 import argparse, glob, json, os
-from .profile import profile_file
+from .profile import profile_file, profile_column
 from .synthesize import synthesize
 from ..config import DEFAULTS
 
@@ -35,6 +35,24 @@ def _render_md(d):
                        f"{c['cardinality']} | {c.get('sensitive', False)} | "
                        f"{c.get('description','')} |\n")
     return "".join(out)
+
+def profile_dataframe(df, thresholds=DEFAULTS):
+    cols = {name: profile_column(df[name], name=name, thresholds=thresholds) for name in df.columns}
+    return {"file_metadata": [], "row_count": int(df.shape[0]), "columns": cols}
+
+def add_layer_to_dictionary(dict_path, out_dir, name, df, thresholds=DEFAULTS,
+                            join_keys=("public_client_id",), id_pool_size=50):
+    with open(dict_path) as f: d = json.load(f)
+    prof = profile_dataframe(df, thresholds); prof["derived"] = True
+    d["files"][name] = prof
+    with open(dict_path, "w") as f: json.dump(d, f, indent=2)
+    with open(os.path.join(os.path.dirname(dict_path), "dictionary.md"), "w") as f:
+        f.write(_render_md(d))
+    ss = os.path.join(out_dir, "synthetic_samples"); os.makedirs(ss, exist_ok=True)
+    id_pool = [f"SYNTH_{i:04d}" for i in range(id_pool_size)]
+    synth = synthesize(prof, n_rows=100, seed=0, join_keys=join_keys, id_pool=id_pool)
+    synth.to_csv(os.path.join(ss, name if name.endswith(".csv") else name + ".csv"), index=False)
+    return prof
 
 def main():
     ap = argparse.ArgumentParser()
