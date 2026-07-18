@@ -13,7 +13,7 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 2;;
   esac
 done
-RSYNC_OPTS=(-ai --delete --exclude '__pycache__' --exclude '*.pyc')
+RSYNC_OPTS=(-ai --exclude '__pycache__' --exclude '*.pyc' --exclude 'README.md')
 if [ -n "$DEST" ]; then
   mkdir -p "$DEST"
   rsync "${RSYNC_OPTS[@]}" "$SRC" "$DEST/"
