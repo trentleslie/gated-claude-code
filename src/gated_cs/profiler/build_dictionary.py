@@ -21,18 +21,28 @@ def _pip_freeze():
     except Exception:
         return []
 
-def _codebook_text(path):
+def _codebook_text(path, cap=1000):
     # Codebook files (role=="codebook") are study-instrument reference metadata
     # (field names / question text), not per-subject rows — the normal
     # k-anonymity categorical suppression (profile_column requires >=k
     # occurrences of a value) would blank out exactly the free text we want
     # to surface, since every field/question is typically unique. Re-read the
     # raw text directly for rendering instead of relying on prof["columns"].
+    # Caller must gate this behind a no-subject-key check (see build()); the
+    # per-column cap is defense-in-depth to bound the blast radius if a
+    # misclassified file ever reaches here.
     parsed = parse_file(path)
     header_line = max(parsed.data_start_line - 1, 0)
     df = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line,
                      header=0, low_memory=False)
-    return {name: sorted(str(v) for v in df[name].dropna().unique()) for name in parsed.header}
+    out = {}
+    for name in parsed.header:
+        vals = sorted(str(v) for v in df[name].dropna().unique())
+        if len(vals) > cap:
+            extra = len(vals) - cap
+            vals = vals[:cap] + [f"…({extra} more)"]
+        out[name] = vals
+    return out
 
 def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
     if out_dir is None:
@@ -46,16 +56,23 @@ def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
     for df_ in discover_files(data_dir):
         size = os.path.getsize(df_.path)
         prof = profile_file(df_.path, thresholds)
-        prof["source"], prof["stage"], prof["role"] = df_.source, df_.stage, df_.role
-        if df_.role == "codebook":
+        prof["source"], prof["stage"] = df_.source, df_.stage
+        jk = detect_subject_key(list(prof["columns"].keys()))
+        # A genuine REDCap instrument (questions/response_options) has NO subject
+        # key. The codebook raw-text bypass sidesteps SDC suppression, so gate it
+        # behind that structural check — a per-subject file merely *named* like a
+        # codebook (has subject_id/email/free-text) is downgraded to "data" and
+        # profiled+suppressed normally, never raw-dumped. See _codebook_text.
+        is_codebook = df_.role == "codebook" and jk is None
+        prof["role"] = "codebook" if is_codebook else "data"
+        if is_codebook:
             prof["codebook_text"] = _codebook_text(df_.path)
         files[df_.relpath] = prof
         sources.setdefault(df_.source, {})[df_.relpath] = prof
         manifest_files[df_.relpath] = {"sha256": _sha256(df_.path), "bytes": size,
                                        "row_count": prof["row_count"]}
         # synthetic sample (skip codebook — it's reference metadata, not per-person rows)
-        if df_.role != "codebook":
-            jk = detect_subject_key(list(prof["columns"].keys()))
+        if not is_codebook:
             synth = synthesize(prof, n_rows=100, seed=0,
                                join_keys=(jk,) if jk else (), id_pool=id_pool)
             dest = os.path.join(out_dir, "synthetic_samples", df_.relpath)

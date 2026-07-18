@@ -49,6 +49,36 @@ def test_build_groups_by_source_skips_checkpoints_and_writes_manifest(tmp_path):
     assert manifest["files"][os.path.join("oura_ring", "TIME_oura_heartrate.csv")]["row_count"] == 300
     assert "sha256" in manifest["files"][os.path.join("oura_ring", "TIME_oura_heartrate.csv")]
 
+def test_codebook_bypass_gated_on_no_subject_key(tmp_path):
+    # A raw per-subject file NAMED like a codebook (has a codebook token in its
+    # filename) but whose COLUMNS carry a subject key + PII must NOT hit the
+    # raw-text bypass — it should be downgraded to role="data" and suppressed.
+    data_dir = _mk(tmp_path)
+    raw = tmp_path / "TIME" / "redcap_questionnaires" / "raw"
+    pd.DataFrame({
+        "subject_id": [f"S{i:02d}" for i in range(8)],
+        "email": [f"user{i}@example.com" for i in range(8)],
+        "free_text_answer": [f"my private note number {i} is unique" for i in range(8)],
+    }).to_csv(raw / "TIME_subject_answers_to_questions.csv", index=False)
+    out = str(tmp_path / "out_neg")
+    d = build(data_dir, out_dir=out, thresholds=DEFAULTS)
+
+    trap = os.path.join("redcap_questionnaires", "raw", "TIME_subject_answers_to_questions.csv")
+    # (a) downgraded to data, not codebook, and no raw-text dump attached
+    assert d["files"][trap]["role"] == "data"
+    assert "codebook_text" not in d["files"][trap]
+    # (b) no subject-linked value reaches either artifact
+    json_txt = open(os.path.join(out, "dictionary.json")).read()
+    md_txt = open(os.path.join(out, "dictionary.md")).read()
+    for artifact in (json_txt, md_txt):
+        assert "user0@example.com" not in artifact
+        assert "my private note number 0 is unique" not in artifact
+        assert "S00" not in artifact
+    # (c) a genuine codebook (questions file, NO subject key) still surfaces text
+    genuine = os.path.join("redcap_questionnaires", "raw", "TIME_redcap_questions.csv")
+    assert d["files"][genuine]["role"] == "codebook"
+    assert "How rested?" in md_txt
+
 def test_build_synthetic_samples_leak_nothing_real(tmp_path):
     data_dir = _mk(tmp_path)
     out = str(tmp_path / "out2")
