@@ -5,4 +5,6 @@ class Thresholds:
     row_cap: int = 20
     cardinality_cap: int = 50
     bin_min_count: int = 5
+    large_file_bytes: int = 25_000_000
+    chunk_rows: int = 200_000
 DEFAULTS = Thresholds()

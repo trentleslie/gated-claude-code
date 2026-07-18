@@ -16,6 +16,16 @@ def _nice_step(span, target_bins=10):
             return m * mag
     return 10 * mag
 
+def _nice_edges(lo_v, hi_v, thresholds):
+    step = _nice_step(hi_v - lo_v)
+    start = math.floor(lo_v / step) * step
+    end = (math.floor(hi_v / step) + 1) * step   # strictly > hi_v so max is never an edge
+    edges, e = [], start
+    while e <= end + step / 2:
+        edges.append(round(e, 10))
+        e += step
+    return edges
+
 def _histogram(s, thresholds):
     s = s.dropna()
     s = s[np.isfinite(s)]          # drop inf/-inf — cannot be binned, and break edge math
@@ -24,14 +34,7 @@ def _histogram(s, thresholds):
     if s.nunique() < 2:
         return []  # constant column: any bin would pin the shared value; nothing safe to bin
     lo_v, hi_v = float(s.min()), float(s.max())
-    step = _nice_step(hi_v - lo_v)
-    start = math.floor(lo_v / step) * step
-    end = (math.floor(hi_v / step) + 1) * step   # strictly > hi_v so max is never an edge
-    edges = []
-    e = start
-    while e <= end + step / 2:
-        edges.append(round(e, 10))
-        e += step
+    edges = _nice_edges(lo_v, hi_v, thresholds)
     counts = pd.cut(s, bins=edges, include_lowest=True, right=False).value_counts().sort_index()
     out = []
     for interval, count in counts.items():
@@ -76,4 +79,29 @@ def profile_file(path, thresholds=DEFAULTS):
             col["description"] = parsed.column_descriptions[name]
         cols[name] = col
     return {"path": path, "delimiter": parsed.delimiter, "row_count": int(df.shape[0]),
+            "file_metadata": parsed.file_metadata, "columns": cols}
+
+def _finalize_numeric(counts_by_interval, thresholds):
+    out = []
+    for interval, count in counts_by_interval.sort_index().items():
+        if int(count) >= thresholds.bin_min_count:
+            out.append({"lo": float(interval.left), "hi": float(interval.right), "count": int(count)})
+    return out
+
+def profile_file_chunked(path, thresholds=DEFAULTS, chunk_rows=None):
+    parsed = parse_file(path)
+    header_line = max(parsed.data_start_line - 1, 0)
+    chunk_rows = chunk_rows or thresholds.chunk_rows
+    reader = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line, header=0,
+                         low_memory=False, chunksize=chunk_rows)
+    chunks = list(reader)  # skinny iteration; released after pass below
+    row_count = int(sum(c.shape[0] for c in chunks))
+    cols = {}
+    for name in parsed.header:
+        series_all = pd.concat([c[name] for c in chunks], ignore_index=True)
+        col = profile_column(series_all, name=name, thresholds=thresholds)
+        if name in parsed.column_descriptions:
+            col["description"] = parsed.column_descriptions[name]
+        cols[name] = col
+    return {"path": path, "delimiter": parsed.delimiter, "row_count": row_count,
             "file_metadata": parsed.file_metadata, "columns": cols}
