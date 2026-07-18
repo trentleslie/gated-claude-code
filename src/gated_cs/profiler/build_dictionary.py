@@ -130,6 +130,9 @@ def add_layer_to_dictionary(dict_path, out_dir, name, df, thresholds=DEFAULTS,
     with open(dict_path) as f: d = json.load(f)
     prof = profile_dataframe(df, thresholds); prof["derived"] = True
     d["files"][name] = prof
+    # _render_md iterates d["sources"]; register derived layers (no device folder)
+    # under the "" root source so they aren't silently dropped from dictionary.md.
+    d.setdefault("sources", {}).setdefault("", {})[name] = prof
     with open(dict_path, "w") as f: json.dump(d, f, indent=2)
     with open(os.path.join(os.path.dirname(dict_path), "dictionary.md"), "w") as f:
         f.write(_render_md(d))
