@@ -4,12 +4,12 @@ SUBJECT_KEY_CANDIDATES = (
     "user_id", "record_id", "id",
 )
 
-def detect_subject_key(columns):
+def detect_subject_key(columns: list[str]) -> str | None:
     lower = {c.lower(): c for c in columns}
     for cand in SUBJECT_KEY_CANDIDATES:
         if cand in lower:
             return lower[cand]
     return None
 
-def cohort_n(series):
+def cohort_n(series) -> int:
     return int(series.nunique(dropna=True))
