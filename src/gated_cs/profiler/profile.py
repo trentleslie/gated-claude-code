@@ -2,6 +2,8 @@ import math
 import numpy as np
 import pandas as pd
 from .parse import parse_file
+from .subject_key import detect_subject_key, cohort_n
+from .temporal import is_datetime_name, month_bounds, cadence_label
 from ..config import DEFAULTS
 
 def _nice_step(span, target_bins=10):
@@ -67,7 +69,23 @@ def profile_column(series, name="", thresholds=DEFAULTS):
             out["suppressed_high_cardinality"] = True
     return out
 
-def profile_file(path, thresholds=DEFAULTS):
+def _attach_facets(df, parsed, cols, thresholds, sample_rows):
+    subject_key = detect_subject_key(parsed.header)
+    cn = int(cohort_n(df[subject_key])) if subject_key else None
+    sid_sample = df[subject_key].head(sample_rows) if subject_key else None
+    for name in parsed.header:
+        if not is_datetime_name(name) and not pd.api.types.is_datetime64_any_dtype(df[name]):
+            continue
+        ts = pd.to_datetime(df[name], errors="coerce").dropna()
+        if ts.empty:
+            continue
+        cov = month_bounds(ts.min(), ts.max())
+        cov["n_timestamps"] = int(ts.shape[0])
+        cov["cadence"] = cadence_label(df[name].head(sample_rows), sid_sample)
+        cols[name]["temporal_coverage"] = cov
+    return subject_key, cn
+
+def profile_file(path, thresholds=DEFAULTS, sample_rows=None):
     parsed = parse_file(path)
     header_line = max(parsed.data_start_line - 1, 0)
     df = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line,
@@ -78,5 +96,8 @@ def profile_file(path, thresholds=DEFAULTS):
         if name in parsed.column_descriptions:
             col["description"] = parsed.column_descriptions[name]
         cols[name] = col
+    sample_rows = sample_rows or thresholds.cadence_sample_rows
+    subject_key, cn = _attach_facets(df, parsed, cols, thresholds, sample_rows)
     return {"path": path, "delimiter": parsed.delimiter, "row_count": int(df.shape[0]),
-            "file_metadata": parsed.file_metadata, "columns": cols}
+            "file_metadata": parsed.file_metadata, "columns": cols,
+            "subject_key": subject_key, "cohort_n": cn}
