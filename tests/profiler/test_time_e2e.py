@@ -1,4 +1,4 @@
-import os, json, glob
+import os, json, glob, re
 import pandas as pd
 from gated_cs.config import DEFAULTS
 from gated_cs.profiler.build_dictionary import build
@@ -28,13 +28,16 @@ def test_no_raw_values_and_kanon_hold(tmp_path):
     dict_json = open(os.path.join(out, "dictionary.json")).read()
     all_synth = "".join(open(p).read() for p in
                         glob.glob(os.path.join(out, "synthetic_samples", "**", "*.csv"), recursive=True))
-    blob = dict_json + all_synth
+    md = open(os.path.join(out, "dictionary.md")).read()   # 3rd protected artifact must also be leak-free
+    blob = dict_json + all_synth + md
 
-    # 1. free-text near-unique values never leak
+    # 1. free-text near-unique values never leak (scan ALL artifacts incl. dictionary.md)
     assert "SECRET_NOTE" in dict_json          # column name is fine
     assert "note_0_0" not in blob and "note_5_10" not in blob
-    # 2. real subject ids never leak (SYNTH_ pool only)
-    assert "S00" not in all_synth and "S11" not in all_synth
+    # 2. real subject ids never leak anywhere (raw values absent from json/md/synth),
+    #    and ids are positively remapped to the SYNTH_ pool (not silently dropped)
+    assert "S00" not in blob and "S06" not in blob and "S11" not in blob
+    assert re.search(r"SYNTH_\d{4}", all_synth)
     # 3. exact DOB never leaks; date column suppressed
     assert "1990-01-01" not in blob
     # 4. rare category (<k) suppressed
