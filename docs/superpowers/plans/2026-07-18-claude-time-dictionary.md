@@ -12,10 +12,12 @@
 
 - **Isolation invariant:** every byte of raw data is read only by scripts on the data box; only aggregate, k-anon-safe metadata ever surfaces off-box or into an assistant's context. No raw row value is ever read into a transcript. (Enforced by tests, not trust.)
 - **SDC core reused unchanged:** k-anonymity `k=5`, rare-category suppression, high-cardinality suppression, data-independent "nice" histogram edges, full value suppression for sensitive/near-unique/identifier/datetime columns, per-column-independent synthetic samples. New code wraps this logic; it does not edit it.
-- **k-anon computed on full counts, never a sample** — chunking accumulates exact counts.
+- **k-anon computed on full counts, never a sample** — every file is read whole and profiled per-column.
 - **Timestamps:** exact per-row timestamps stay suppressed; datetime columns emit only month-granular min/max + a bucketed cadence estimate.
 - **Reproducibility (experiment-hygiene SOP):** `build()` writes to a timestamped output dir *by default* (not behind a flag), prints the path on completion, and writes a `run_manifest.json` pinning per-file content-hash + size + row_count, thresholds, detected join keys, and gate-venv package versions. `--out` is an override.
 - **No new third-party deps** beyond pandas/numpy already in the gate venv.
+
+> **Plan amendment (2026-07-18, during execution):** Task 4's chunked large-file path was dropped by decision. The `list(reader)` implementation did not actually bound memory and risked per-chunk dtype divergence, so `profile_file_chunked` / `_finalize_numeric` / the `large_file_bytes` + `chunk_rows` thresholds are removed. The behaviour-preserving `_nice_edges` refactor stays. All files are profiled with a single whole-file read (`build()` already processes one file at a time, so peak memory ≈ one file); Task 8's on-box run verifies this holds for the ~210 MB Oura files. `Thresholds` instead carries `cadence_sample_rows: int = 200_000` for Task 5's cadence sampling. Tasks 5 & 6 below are updated accordingly.
 
 ---
 
@@ -461,7 +463,7 @@ git commit -m "feat(profiler): chunked large-file profiling + shared _nice_edges
 
 **Interfaces:**
 - Consumes: `temporal.is_datetime_name/month_bounds/cadence_label`, `subject_key.detect_subject_key/cohort_n`.
-- Produces: `profile_file(...)` result dict gains top-level `"subject_key": str | None` and `"cohort_n": int | None`; each datetime column dict gains `"temporal_coverage": {min_month, max_month, n_timestamps, cadence}` (in addition to staying `sensitive`/suppressed). Signature adds keyword `sample_rows: int | None = None` (defaults to `thresholds.chunk_rows`) bounding the cadence sample.
+- Produces: `profile_file(...)` result dict gains top-level `"subject_key": str | None` and `"cohort_n": int | None`; each datetime column dict gains `"temporal_coverage": {min_month, max_month, n_timestamps, cadence}` (in addition to staying `sensitive`/suppressed). Signature adds keyword `sample_rows: int | None = None` (defaults to `thresholds.cadence_sample_rows`) bounding the cadence sample.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -531,14 +533,14 @@ def _attach_facets(df, parsed, cols, thresholds, sample_rows):
     return subject_key, cn
 
 # then, replacing the return of profile_file:
-    sample_rows = sample_rows or thresholds.chunk_rows
+    sample_rows = sample_rows or thresholds.cadence_sample_rows
     subject_key, cn = _attach_facets(df, parsed, cols, thresholds, sample_rows)
     return {"path": path, "delimiter": parsed.delimiter, "row_count": int(df.shape[0]),
             "file_metadata": parsed.file_metadata, "columns": cols,
             "subject_key": subject_key, "cohort_n": cn}
 ```
 
-For `profile_file_chunked`, build `df = pd.concat(chunks, ignore_index=True)` once at the end (bounded — see Task 4 note) OR pass the concatenated skinny columns; simplest correct form: reuse the same `_attach_facets(pd.concat(chunks, ignore_index=True), parsed, cols, thresholds, sample_rows)` and add the same two keys to its return dict. Add `sample_rows=None` to both signatures.
+(Per the plan amendment, there is no `profile_file_chunked` — only `profile_file` needs this change.) Add `sample_rows=None` to `profile_file`'s signature.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -562,7 +564,7 @@ git commit -m "feat(profiler): attach subject-key, cohort-N, and coarse temporal
 
 **Interfaces:**
 - Consumes: `discover_files`, `profile_file`, `profile_file_chunked`, `detect_subject_key`, `synthesize`.
-- Produces: `build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50) -> dict`. When `out_dir` is `None`, writes to `~/claude-time-dictionary/<UTC-timestamp>/` (timestamp passed in / stamped by caller to stay deterministic in tests — accept `out_dir` in tests). Dictionary shape: `{"data_dir", "sources": {source: {relpath: file_profile}}, "files": {relpath: file_profile}}`. Large files (size ≥ `thresholds.large_file_bytes`) go through `profile_file_chunked`. Codebook files get `role: "codebook"` and their descriptive columns rendered in md. Writes `dictionary.json`, `dictionary.md`, `synthetic_samples/<relpath>`, and `run_manifest.json`.
+- Produces: `build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50) -> dict`. When `out_dir` is `None`, writes to `~/claude-time-dictionary/<UTC-timestamp>/` (timestamp passed in / stamped by caller to stay deterministic in tests — accept `out_dir` in tests). Dictionary shape: `{"data_dir", "sources": {source: {relpath: file_profile}}, "files": {relpath: file_profile}}`. Every file is profiled with a single `profile_file` read (no chunking — per the plan amendment). Codebook files get `role: "codebook"` and their descriptive columns rendered in md. Writes `dictionary.json`, `dictionary.md`, `synthetic_samples/<relpath>`, and `run_manifest.json`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -640,7 +642,7 @@ Rewrite `build` in `src/gated_cs/profiler/build_dictionary.py` (keep `add_layer_
 ```python
 # src/gated_cs/profiler/build_dictionary.py  (new build + helpers)
 import glob, hashlib, json, os, subprocess, sys
-from .profile import profile_file, profile_file_chunked
+from .profile import profile_file
 from .synthesize import synthesize
 from .discover import discover_files
 from .subject_key import detect_subject_key
@@ -671,9 +673,7 @@ def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
     files, sources, manifest_files = {}, {}, {}
     for df_ in discover_files(data_dir):
         size = os.path.getsize(df_.path)
-        prof = (profile_file_chunked(df_.path, thresholds)
-                if size >= thresholds.large_file_bytes
-                else profile_file(df_.path, thresholds))
+        prof = profile_file(df_.path, thresholds)
         prof["source"], prof["stage"], prof["role"] = df_.source, df_.stage, df_.role
         files[df_.relpath] = prof
         sources.setdefault(df_.source, {})[df_.relpath] = prof
@@ -875,7 +875,7 @@ Note the output dir + manifest content-hashes in the session summary and the `pr
 **1. Spec coverage:**
 - §1 recursive discovery/grouping → Task 1 + Task 6. ✓
 - §2 configurable/auto-detected subject key + cohort-N → Task 2 + Task 5. ✓
-- §3 large-file chunking, k-anon on full counts → Task 4. ✓
+- §3 large-file handling → Task 4, amended: chunking dropped (see Plan amendment); single whole-file read, k-anon on full counts. Memory verified on box in Task 8. ✓
 - §4 coarse temporal coverage → Task 3 + Task 5. ✓
 - §5 reference-codebook handling → Task 1 (tagging) + Task 6 (rendering, synthesis skip). ✓
 - §6 timestamped output + run manifest → Task 6. ✓
