@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Deploy provision/skills/* to the gated box's cs-gated ~/.claude/skills (default),
+# or to a local --dest DIR (for testing). Idempotent (rsync).
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")/.." && pwd)"   # -> provision/
+SRC="$HERE/skills/"
+DEST=""
+SSH_HOST="${GCS_BOX:-10.0.0.96}"
+KEY="${GCS_KEY:-$HOME/.ssh/id_ed25519_phenome}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dest) DEST="${2:?--dest needs a dir}"; shift 2;;
+    *) echo "unknown arg: $1" >&2; exit 2;;
+  esac
+done
+RSYNC_OPTS=(-ai --delete --exclude '__pycache__' --exclude '*.pyc')
+if [ -n "$DEST" ]; then
+  mkdir -p "$DEST"
+  rsync "${RSYNC_OPTS[@]}" "$SRC" "$DEST/"
+else
+  CG="$(ssh -i "$KEY" "root@$SSH_HOST" 'getent passwd cs-gated | cut -d: -f6')"
+  [ -n "$CG" ] || { echo "cs-gated not found on $SSH_HOST" >&2; exit 1; }
+  rsync "${RSYNC_OPTS[@]}" -e "ssh -i $KEY" "$SRC" "root@$SSH_HOST:$CG/.claude/skills/"
+  ssh -i "$KEY" "root@$SSH_HOST" "chown -R cs-gated:cs-gated '$CG/.claude/skills'"
+  echo "deployed to $SSH_HOST:$CG/.claude/skills"
+fi
