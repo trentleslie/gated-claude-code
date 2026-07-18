@@ -26,3 +26,30 @@ def test_profile_file_emits_subject_key_cohort_and_temporal(tmp_path):
     assert cov["n_timestamps"] == 20 * 48
     # subject_id column present and suppressed as identifier
     assert prof["columns"]["subject_id"]["sensitive"] is True
+
+def _write_mixed_tz(tmp_path):
+    # real wearable timestamps carry mixed UTC offsets across rows/subjects
+    stamps = ["2025-01-01T00:00:00+00:00", "2025-01-01T02:00:00-08:00",
+              "2025-06-15T12:00:00+00:00", "2025-06-15T10:00:00-08:00"]
+    rows = []
+    for sid in range(3):
+        for i, ts in enumerate(stamps):
+            rows.append({"subject_id": f"S{sid:03d}", "timestamp": ts,
+                         "resting_time": 1800 + i})  # int64 duration in seconds, name looks like a datetime
+    p = tmp_path / "mixed_tz.csv"
+    pd.DataFrame(rows).to_csv(p, index=False)
+    return str(p)
+
+def test_profile_file_mixed_tz_timestamps_no_warning(tmp_path, recwarn):
+    prof = profile_file(_write_mixed_tz(tmp_path), DEFAULTS)
+    cov = prof["columns"]["timestamp"]["temporal_coverage"]
+    # min/max computed in UTC: Jan 1 and Jun 15, regardless of local offset
+    assert cov["min_month"] == "2025-01" and cov["max_month"] == "2025-06"
+    assert cov["cadence"] is not None and cov["cadence"] != "unknown"
+    assert len(recwarn) == 0
+
+def test_profile_file_numeric_duration_column_skips_temporal_coverage(tmp_path):
+    prof = profile_file(_write_mixed_tz(tmp_path), DEFAULTS)
+    resting = prof["columns"]["resting_time"]
+    assert "temporal_coverage" not in resting  # int seconds, not a real datetime
+    assert resting["dtype"].startswith("int")  # still profiled normally

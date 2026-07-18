@@ -74,9 +74,11 @@ def _attach_facets(df, parsed, cols, thresholds, sample_rows):
     cn = int(cohort_n(df[subject_key])) if subject_key else None
     sid_sample = df[subject_key].head(sample_rows) if subject_key else None
     for name in parsed.header:
+        if pd.api.types.is_numeric_dtype(df[name]):
+            continue  # e.g. int-seconds duration columns whose NAME matches the datetime pattern
         if not is_datetime_name(name) and not pd.api.types.is_datetime64_any_dtype(df[name]):
             continue
-        ts = pd.to_datetime(df[name], errors="coerce").dropna()
+        ts = pd.to_datetime(df[name], errors="coerce", utc=True, format="mixed").dropna()
         if ts.empty:
             continue
         cov = month_bounds(ts.min(), ts.max())

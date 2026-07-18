@@ -33,7 +33,7 @@ def bucket_cadence(median_seconds) -> str:
     return "~coarser than weekly"
 
 def _median_delta_seconds(ts_sample, sid_sample) -> float | None:
-    ts = pd.to_datetime(ts_sample, errors="coerce", format="mixed")
+    ts = pd.to_datetime(ts_sample, errors="coerce", format="mixed", utc=True)
     frame = pd.DataFrame({"ts": ts.values})
     if sid_sample is not None:
         frame["sid"] = pd.Series(list(sid_sample)[: len(frame)]).values

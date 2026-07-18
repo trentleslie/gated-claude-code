@@ -1,6 +1,6 @@
 # Ranked most-specific first; detection returns the first candidate present.
 SUBJECT_KEY_CANDIDATES = (
-    "subject_id", "participant_id", "public_client_id",
+    "time_traveler_id", "subject_id", "participant_id", "public_client_id",
     "user_id", "record_id", "id",
 )
 
