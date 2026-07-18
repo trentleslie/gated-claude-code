@@ -80,28 +80,3 @@ def profile_file(path, thresholds=DEFAULTS):
         cols[name] = col
     return {"path": path, "delimiter": parsed.delimiter, "row_count": int(df.shape[0]),
             "file_metadata": parsed.file_metadata, "columns": cols}
-
-def _finalize_numeric(counts_by_interval, thresholds):
-    out = []
-    for interval, count in counts_by_interval.sort_index().items():
-        if int(count) >= thresholds.bin_min_count:
-            out.append({"lo": float(interval.left), "hi": float(interval.right), "count": int(count)})
-    return out
-
-def profile_file_chunked(path, thresholds=DEFAULTS, chunk_rows=None):
-    parsed = parse_file(path)
-    header_line = max(parsed.data_start_line - 1, 0)
-    chunk_rows = chunk_rows or thresholds.chunk_rows
-    reader = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line, header=0,
-                         low_memory=False, chunksize=chunk_rows)
-    chunks = list(reader)  # skinny iteration; released after pass below
-    row_count = int(sum(c.shape[0] for c in chunks))
-    cols = {}
-    for name in parsed.header:
-        series_all = pd.concat([c[name] for c in chunks], ignore_index=True)
-        col = profile_column(series_all, name=name, thresholds=thresholds)
-        if name in parsed.column_descriptions:
-            col["description"] = parsed.column_descriptions[name]
-        cols[name] = col
-    return {"path": path, "delimiter": parsed.delimiter, "row_count": row_count,
-            "file_metadata": parsed.file_metadata, "columns": cols}
