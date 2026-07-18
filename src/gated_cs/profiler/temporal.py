@@ -19,6 +19,8 @@ def is_datetime_name(name: str) -> bool:
     return bool(_DATETIME_NAME.search(name or ""))
 
 def month_bounds(min_ts, max_ts) -> dict:
+    if pd.isna(min_ts) or pd.isna(max_ts):
+        return {"min_month": None, "max_month": None}
     return {"min_month": pd.Timestamp(min_ts).strftime("%Y-%m"),
             "max_month": pd.Timestamp(max_ts).strftime("%Y-%m")}
 
@@ -31,7 +33,7 @@ def bucket_cadence(median_seconds) -> str:
     return "~coarser than weekly"
 
 def _median_delta_seconds(ts_sample, sid_sample) -> float | None:
-    ts = pd.to_datetime(ts_sample, errors="coerce")
+    ts = pd.to_datetime(ts_sample, errors="coerce", format="mixed")
     frame = pd.DataFrame({"ts": ts.values})
     if sid_sample is not None:
         frame["sid"] = pd.Series(list(sid_sample)[: len(frame)]).values

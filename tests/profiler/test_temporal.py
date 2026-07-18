@@ -23,6 +23,11 @@ def test_cadence_label_is_per_subject():
     sid = pd.Series(["A"] * 10 + ["B"] * 10)
     assert cadence_label(ts, sid) == "~1/5 min"
 
+def test_cadence_label_global_fallback_no_sids():
+    base = pd.Timestamp("2025-01-01")
+    ts = pd.Series([base + pd.Timedelta(minutes=5 * i) for i in range(10)])
+    assert cadence_label(ts) == "~1/5 min"
+
 def test_is_datetime_name():
     assert is_datetime_name("timestamp") and is_datetime_name("created_at")
     assert is_datetime_name("bedtime_start") and not is_datetime_name("heart_rate")
