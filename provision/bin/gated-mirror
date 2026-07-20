@@ -7,6 +7,8 @@
 # do not persist). Run as root by the gated-mirror-<label> systemd unit.
 #   usage: gated-mirror <SRC_workspace_dir> <DST_mirror_dir>
 set -euo pipefail
+command -v inotifywait >/dev/null || { echo "gated-mirror: inotifywait not found — install inotify-tools" >&2; exit 1; }
+command -v rsync >/dev/null      || { echo "gated-mirror: rsync not found — install rsync" >&2; exit 1; }
 SRC="${1:?usage: gated-mirror <src> <dst>}"; SRC="${SRC%/}/"
 DST="${2:?usage: gated-mirror <src> <dst>}"; DST="${DST%/}/"
 mkdir -p "$DST"; chown root:root "$DST"; chmod 700 "$DST"

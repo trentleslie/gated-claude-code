@@ -136,7 +136,7 @@ install -m 0755 "$SRC/provision/bin/to-notebook" /usr/local/bin/to-notebook
 install -d -o cs-gated -g cs-gated -m 0755 /home/cs-gated/.claude /home/cs-gated/.claude/commands
 install -o cs-gated -g cs-gated -m 0644 "$SRC/provision/jupyter-command.md" /home/cs-gated/.claude/commands/jupyter.md
 if [ -n "$MIRROR_DIR" ]; then
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync >/dev/null   # inotify-tools already pulled in
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync inotify-tools >/dev/null  # gated-mirror needs both
   install -m 0755 "$SRC/provision/bin/gated-mirror" /usr/local/bin/gated-mirror
   mkdir -p "$MIRROR_DIR"; chown root:root "$MIRROR_DIR"; chmod 700 "$MIRROR_DIR"
   cat > "/etc/systemd/system/gated-mirror-${LABEL}.service" <<UNIT
