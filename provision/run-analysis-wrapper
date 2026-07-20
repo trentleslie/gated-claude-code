@@ -5,7 +5,7 @@
 # execution.
 set -euo pipefail
 SCRIPT="$1"
-DATA_DIR=/data/arivale                       # hardcoded, never from env/args
+DATA_DIR=__GATED_CS_DATA_DIR__               # baked in at install by provision.sh; never from env/args
 OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
 exec env -i \
   PATH=/opt/gated-cs/bin:/usr/local/bin:/usr/bin:/bin \
