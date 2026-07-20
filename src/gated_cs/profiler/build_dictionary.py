@@ -150,26 +150,41 @@ def main():
     a = ap.parse_args()
     build(a.data_dir, a.out)
 
-def build_synthetic_from_dictionary(dict_path, out_dir, join_keys=("public_client_id",),
+def build_synthetic_from_dictionary(dict_path, out_dir, join_keys=None,
                                     id_pool_size=50, n_rows=100, seed=0):
+    # Regenerate synthetic samples from a dictionary alone (no raw-data read). Matches build():
+    # keys may be nested (source/name.csv) so parent dirs are created; the join key is auto-detected
+    # per file when not supplied; codebook files carry no synthetic sample. join_keys, if given,
+    # overrides detection for every file.
     with open(dict_path) as f:
         d = json.load(f)
     ss = os.path.join(out_dir, "synthetic_samples")
     os.makedirs(ss, exist_ok=True)
     id_pool = [f"SYNTH_{i:04d}" for i in range(id_pool_size)]
+    written = 0
     for name, prof in d["files"].items():
-        synth = synthesize(prof, n_rows=n_rows, seed=seed, join_keys=join_keys, id_pool=id_pool)
-        synth.to_csv(os.path.join(ss, name), index=False)
-    return len(d["files"])
+        if prof.get("role") == "codebook":
+            continue
+        jk = join_keys
+        if jk is None:
+            detected = detect_subject_key(list(prof["columns"].keys()))
+            jk = (detected,) if detected else ()
+        synth = synthesize(prof, n_rows=n_rows, seed=seed, join_keys=jk, id_pool=id_pool)
+        dest = os.path.join(ss, name)
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        synth.to_csv(dest, index=False)
+        written += 1
+    return written
 
 def synthetic_main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--dictionary", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--join-keys", default="public_client_id")
+    ap.add_argument("--join-keys", default=None,
+                    help="comma-separated join keys; default: auto-detect the subject key per file")
     ap.add_argument("--id-pool-size", type=int, default=50)
     a = ap.parse_args()
-    join_keys = tuple(k.strip() for k in a.join_keys.split(",") if k.strip())
+    join_keys = tuple(k.strip() for k in a.join_keys.split(",") if k.strip()) if a.join_keys else None
     n = build_synthetic_from_dictionary(a.dictionary, a.out, join_keys=join_keys,
                                         id_pool_size=a.id_pool_size)
     print(f"Wrote synthetic samples for {n} files to {os.path.join(a.out, 'synthetic_samples')}")
