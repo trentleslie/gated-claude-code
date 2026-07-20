@@ -1,0 +1,34 @@
+#!/usr/bin/env python3
+"""Convert an analysis .py into a Jupyter notebook (.ipynb) beside it.
+Splits into cells on lines starting with '# %%'. Pure stdlib — no jupytext/nbformat needed,
+so it runs for cs-gated with only the system python3. Invoked by the /jupyter slash command."""
+import json, os, re, sys
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit("usage: to-notebook <script.py>")
+    src = sys.argv[1]
+    text = open(src).read()
+    marker = re.compile(r'^# ?%%')
+    cells, cur = [], []
+    for ln in text.splitlines(keepends=True):
+        if marker.match(ln):
+            if cur:
+                cells.append("".join(cur)); cur = []
+            continue
+        cur.append(ln)
+    if cur:
+        cells.append("".join(cur))
+    if not cells:
+        cells = [text]
+    nb = {"cells": [{"cell_type": "code", "metadata": {}, "execution_count": None,
+                     "outputs": [], "source": c.splitlines(keepends=True)}
+                    for c in cells if c.strip()],
+          "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python",
+                                      "name": "python3"}},
+          "nbformat": 4, "nbformat_minor": 5}
+    dst = os.path.splitext(src)[0] + ".ipynb"
+    json.dump(nb, open(dst, "w"), indent=1)
+    print(dst)
+
+main()

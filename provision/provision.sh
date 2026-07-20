@@ -11,7 +11,11 @@ SRC="${1:-/opt/gated-cs-src}"   # path to the copied repo on the VM
 #   LABEL    — instance name; drives the workspace CLAUDE.md and the claude-<LABEL>* launchers.
 DATA_DIR="${DATA_DIR:-/data/arivale}"
 LABEL="${LABEL:-arivale}"
-echo "== gated-cs provision: LABEL=$LABEL  DATA_DIR=$DATA_DIR =="
+#   MIRROR_DIR — optional: if set, install the one-way workspace->JupyterLab mirror targeting this dir
+#                (root-run JupyterLab reads it; cs-gated denied). Empty = skip the mirror. The /jupyter
+#                skill (.py -> .ipynb) is installed regardless.
+MIRROR_DIR="${MIRROR_DIR:-}"
+echo "== gated-cs provision: LABEL=$LABEL  DATA_DIR=$DATA_DIR  MIRROR_DIR=${MIRROR_DIR:-<none>} =="
 
 echo "== 1. prerequisites =="
 # unprivileged user namespaces must be usable for non-root bwrap
@@ -125,6 +129,37 @@ fi
 exec tmux attach -t "\$S"
 REMOTE
 chmod 0755 "/usr/local/bin/claude-${LABEL}" "/usr/local/bin/claude-${LABEL}-launch" "/usr/local/bin/claude-${LABEL}-remote"
+
+echo "== 10. JupyterLab handoff: /jupyter skill + optional one-way workspace mirror =="
+# .py -> .ipynb converter (stdlib; runs as cs-gated) + the /jupyter slash command in cs-gated's config
+install -m 0755 "$SRC/provision/bin/to-notebook" /usr/local/bin/to-notebook
+install -d -o cs-gated -g cs-gated -m 0755 /home/cs-gated/.claude /home/cs-gated/.claude/commands
+install -o cs-gated -g cs-gated -m 0644 "$SRC/provision/jupyter-command.md" /home/cs-gated/.claude/commands/jupyter.md
+if [ -n "$MIRROR_DIR" ]; then
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rsync >/dev/null   # inotify-tools already pulled in
+  install -m 0755 "$SRC/provision/bin/gated-mirror" /usr/local/bin/gated-mirror
+  mkdir -p "$MIRROR_DIR"; chown root:root "$MIRROR_DIR"; chmod 700 "$MIRROR_DIR"
+  cat > "/etc/systemd/system/gated-mirror-${LABEL}.service" <<UNIT
+[Unit]
+Description=One-way mirror: cs-gated ${LABEL} workspace -> ${MIRROR_DIR} (JupyterLab), read-only outward
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/gated-mirror /home/cs-gated/analysis ${MIRROR_DIR}
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now "gated-mirror-${LABEL}.service"
+  echo "   mirror active: /home/cs-gated/analysis -> ${MIRROR_DIR} (root-only, one-way)"
+else
+  echo "   MIRROR_DIR unset -> /jupyter installed but no live mirror (operator can set MIRROR_DIR to enable)"
+fi
 
 echo "Provision complete (LABEL=${LABEL}). Gate reads DATA_DIR=${DATA_DIR}."
 echo "Next: build the dictionary as cs-exec, validate the gate (RUNBOOK), then launch: claude-${LABEL}"

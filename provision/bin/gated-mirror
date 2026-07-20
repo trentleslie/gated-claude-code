@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# ONE-WAY mirror: the cs-gated analysis workspace -> a JupyterLab-visible dir (usually under /procedure,
+# where the managed JupyterLab runs as root). Direction is load-bearing: the workspace (non-disclosive by
+# construction) flows OUT to JupyterLab; nothing flows back into cs-gated's readable space. The destination
+# is ROOT-ONLY (cs-gated denied even if a raw extract is dropped there), enforced independently of the
+# source's ownership/perms. --delete makes it a faithful read-only reflection (edits on the JupyterLab side
+# do not persist). Run as root by the gated-mirror-<label> systemd unit.
+#   usage: gated-mirror <SRC_workspace_dir> <DST_mirror_dir>
+set -euo pipefail
+SRC="${1:?usage: gated-mirror <src> <dst>}"; SRC="${SRC%/}/"
+DST="${2:?usage: gated-mirror <src> <dst>}"; DST="${DST%/}/"
+mkdir -p "$DST"; chown root:root "$DST"; chmod 700 "$DST"
+sync() {
+  rsync -rltD --delete --no-owner --no-group --no-perms --chmod=D700,F600 \
+        --exclude='.git/' "$SRC" "$DST"
+}
+sync
+# re-sync on any change under the workspace; the destination is never watched -> no feedback loop
+inotifywait -m -r -q -e modify,create,delete,move,close_write "$SRC" | while read -r _; do
+  sync || true
+done
