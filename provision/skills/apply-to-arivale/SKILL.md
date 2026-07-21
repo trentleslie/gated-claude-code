@@ -23,12 +23,20 @@ release only aggregates.
   `public_client_id`, real-file read (`sep="\t", skiprows=13`). Record every platform gap (NMR vs
   Metabolon, Olink panels, 16S vs shotgun; names via `*_metadata`) as a **forced adaptation**.
 - **S2 — Value-add extensions.** Choose from the catalog below; tag each with the value it adds and the
-  **wave/grade** it can reach. **Stop for a human pick before any gate spend.**
+  **wave/grade** it can reach. **Stop for a human pick before any gate spend.** If `--tre` was passed,
+  external validation is already committed for S4 — a human choice to defer validation at this step is an
+  **explicit override of `--tre`** and must be logged as such in the analysis README. Never let a defer
+  pick silently drop the flag.
 - **S3 — Build + gate-run.** `analyses/<NN-slug>/<slug>.py`; slug-prefix wide-format aggregate outputs
   (every group n >= 5, no identifiers); test on `synthetic_samples/`, then `submit-analysis`. Reuse
   `analyses/_lib/` and existing `methods/` modules — for aging-clock papers, build the clock with the
   verified **method-kd-biological-age** module, then apply the extensions on top.
-- **S4 — Validation.** Downloadable open cohort -> `/validate`. Non-exportable TRE (`--tre`) ->
+- **S4 — Validation.** First **reconcile the `--tre` intent against the S2 validation decision.** If
+  `--tre` requested a platform (`ukb-rap`/`all-of-us`/`both`) but S2 deferred validation, do **not**
+  silently skip: surface the conflict and require an explicit human decision — either run the pack now, or
+  confirm the deferral and record in the README that `--tre <platform>` was overridden. A `--tre` value
+  other than `none` that yields no `validation/` folder and no logged override is a **skill error**, not a
+  valid outcome. Then: downloadable open cohort -> `/validate`. Non-exportable TRE (`--tre`) ->
   `/tre-runpack <released-aggregate> <platform>`; the human runs the pack in the TRE and returns a
   `tre_aggregates.csv`; reconcile with `tre-runpack/reconcile.py` (direction concordance, effect-size
   rank correlation, replication rate).
