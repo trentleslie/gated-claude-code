@@ -4,6 +4,8 @@ import pandas as pd
 from .parse import parse_file
 from .subject_key import detect_subject_key, cohort_n
 from .temporal import is_datetime_name, is_birth_name, month_bounds, cadence_label
+from .format_detect import detect_format
+from .temporal_dist import temporal_distribution
 from ..config import DEFAULTS
 
 def _nice_step(span, target_bins=10):
@@ -87,6 +89,16 @@ def _attach_facets(df, parsed, cols, thresholds, sample_rows):
         cov["n_timestamps"] = int(ts.shape[0])
         cov["cadence"] = cadence_label(df[name].head(sample_rows), sid_sample)
         cols[name]["temporal_coverage"] = cov
+        # R1/R2/R3: per-column, value-free format descriptor.
+        fmt = detect_format(df[name], sid=df[subject_key] if subject_key else None,
+                            thresholds=thresholds)
+        if fmt is not None:
+            cols[name]["format"] = fmt
+        # R4-R16: cohort temporal-structure distribution (needs subject grouping).
+        if subject_key is not None:
+            td = temporal_distribution(df, name, subject_key, thresholds)
+            if td is not None:
+                cols[name]["temporal_distribution"] = td
     return subject_key, cn
 
 def profile_file(path, thresholds=DEFAULTS, sample_rows=None):
