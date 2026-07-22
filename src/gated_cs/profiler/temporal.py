@@ -21,6 +21,23 @@ _CADENCE_BUCKETS = (
 def is_datetime_name(name: str) -> bool:
     return bool(_DATETIME_NAME.search(name or ""))
 
+def epoch_unit(series):
+    """Return 's' or 'ms' if a numeric column looks like a Unix epoch timestamp, else None.
+
+    Distinguishes a genuine epoch column (e.g. a `timestamp` named int64) from a numeric
+    *duration* column (int seconds like 28800) by magnitude: epoch seconds for years
+    ~2001-2100 sit in [1e9, 1e11) and epoch millis in [1e12, 1e14). Durations fall below.
+    """
+    v = pd.to_numeric(series, errors="coerce").dropna()
+    if v.empty:
+        return None
+    m = float(v.abs().median())
+    if 1e9 <= m < 1e11:
+        return "s"
+    if 1e12 <= m < 1e14:
+        return "ms"
+    return None
+
 def is_birth_name(name: str) -> bool:
     return bool(_BIRTH_NAME.search(name or ""))
 
