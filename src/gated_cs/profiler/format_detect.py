@@ -89,25 +89,23 @@ def detect_format(series, sid=None, thresholds=DEFAULTS):
     order = templates.value_counts()          # by occurrence -> dominant is index[0]
     dominant = order.index[0]
 
-    # subject count per distinct template + column-level contributor count (k-anon basis)
+    # subject count per distinct template (k-anon basis for minority formats)
     if sid is not None:
         sid_al = pd.Series(sid).reindex(templates.index)
         frame = pd.DataFrame({"t": templates.values, "sid": sid_al.values})
         subj_count = {t: int(g["sid"].nunique(dropna=True)) for t, g in frame.groupby("t")}
-        col_contrib = int(sid_al.nunique(dropna=True))
     else:
-        subj_count = {t: int(c) for t, c in order.items()}
-        col_contrib = int(templates.shape[0])      # occurrences stand in for subjects
+        subj_count = {t: int(c) for t, c in order.items()}   # occurrences stand in
 
-    # R11/R15: gate the WHOLE descriptor, not just minority formats. A column
-    # contributed by < k subjects discloses its representation/timezone/precision/
-    # mixed-state as a quasi-identifier — suppress it entirely.
-    if col_contrib < k:
-        return None
-
+    # The DOMINANT/canonical format is a device-level export attribute — identical for
+    # every user of that device, not person-linking — so it is disclosed even for a
+    # < k-subject column (restores fidelity for single-subject devices). The k-gate is
+    # kept on the parts that CAN identify: minority formats and the `mixed` flag, which
+    # reflect only formats retained after suppression (so a rare per-subject variant is
+    # never revealed — not even its existence).
     desc = dict(by_template[dominant])
     minority = [by_template[t] for t in order.index[1:] if subj_count.get(t, 0) >= k]
-    desc["mixed"] = len(order) > 1
+    desc["mixed"] = bool(minority)
     if minority:
         desc["minority"] = minority
 

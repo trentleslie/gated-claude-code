@@ -80,16 +80,18 @@ def test_mixed_dominant_and_retained_minority():
 
 
 def test_minority_below_k_suppressed():
-    # dominant present in many subjects; minority format in only 2 subjects (< k=5)
+    # dominant present in many subjects; minority format in only 2 subjects (< k=5).
+    # The < k minority is suppressed AND `mixed` is False — its very existence is not
+    # disclosed (mixed reflects retained formats only).
     dom = [f"2025-01-01T00:00:0{i}Z" for i in range(10) for _ in range(3)]
     minority = ["2025-01-01 00:00:00" for _ in range(6)]  # only 2 subjects
     s = pd.Series(dom + minority)
     sid = pd.Series([f"D{i:03d}" for i in range(10) for _ in range(3)]
                     + ["M000", "M000", "M000", "M001", "M001", "M001"])
     d = detect_format(s, sid=sid, thresholds=DEFAULTS)
-    assert d["mixed"] is True
-    minority_templates = [m["template"] for m in d.get("minority", [])]
-    assert "%Y-%m-%d %H:%M:%S" not in minority_templates   # suppressed (< k subjects)
+    assert d["mixed"] is False                             # only retained formats count
+    assert "minority" not in d                             # < k variant not disclosed at all
+    assert d["timezone"] == "utc"                          # dominant still disclosed
 
 
 # ---- R15 safety: template is value-free ----
@@ -106,13 +108,17 @@ def test_empty_column_returns_none():
     assert detect_format(pd.Series([None, None], dtype="object")) is None
 
 
-# ---- Greptile P1: the WHOLE descriptor is k-gated, not just minority formats ----
+# ---- Format policy: the DOMINANT descriptor is a device-level attribute (always
+#      disclosed); only minority formats + the `mixed` flag are person-count k-gated ----
 
-def test_dominant_format_suppressed_below_k():
-    # a column contributed by < k subjects discloses no format descriptor at all
+def test_dominant_format_disclosed_below_k():
+    # A device's export format is identical for all its users (a vendor attribute), so
+    # the dominant descriptor is disclosed even for a single-/few-subject column.
     s = pd.Series([f"2025-01-01T0{h}:00:00Z" for h in range(6)])
     sid = pd.Series([f"S{i:03d}" for i in range(3) for _ in range(2)])   # 3 subjects < k=5
-    assert detect_format(s, sid=sid, thresholds=DEFAULTS) is None
+    d = detect_format(s, sid=sid, thresholds=DEFAULTS)
+    assert d is not None and d["representation"] == "iso8601"
+    assert d["timezone"] == "utc" and d["mixed"] is False and "minority" not in d
 
 
 def test_dominant_format_disclosed_at_or_above_k():

@@ -108,14 +108,21 @@ for dfrec in discover_files(DATA_DIR):
             continue
         col_report = {"real_contributors": int(fr["sid"].nunique())}
 
-        # (1a) format descriptor is disclosed only when the whole column has >= k real subjects
+        # (1a) format policy: the DOMINANT descriptor is a device-level attribute (exempt).
+        # Only DISCLOSED MINORITY formats are person-linking — verify each has >= k real
+        # subjects against the real data (independent of what the builder claimed).
         if has_fmt:
-            ok = col_report["real_contributors"] >= K
-            col_report["format_disclosed_ge_k"] = ok
-            if not ok:
-                report["reid_leaks"].append(
-                    {"file": dfrec.relpath, "column": name, "element": "format_descriptor",
-                     "real_contributors": col_report["real_contributors"]})
+            from gated_cs.profiler.format_detect import _classify
+            for m in (col["format"].get("minority") or []):
+                tmpl = m.get("template")
+                real_sigs = df[name].dropna().astype(str).map(_classify)
+                subs = {df[subject_key].loc[i] for i, sig in real_sigs.items()
+                        if sig is not None and sig.get("template") == tmpl}
+                col_report.setdefault("minority_real_subjects", {})[tmpl] = len(subs)
+                if len(subs) < K:
+                    report["reid_leaks"].append(
+                        {"file": dfrec.relpath, "column": name,
+                         "element": f"minority_format:{tmpl}", "real_subjects": len(subs)})
 
         if has_td:
             td = col["temporal_distribution"]
