@@ -94,9 +94,12 @@ def _deliver(df_or_path, rel, results_dir, sh):
         df_or_path.to_csv(dest, index=False)   # already-gated (masked) frame
     return dest
 
+MAX_GATE_TIMEOUT = 3600  # hard ceiling (1h) on the operator-configurable analysis timeout
+
+
 def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
         derived_dir=None, layer_dir=None, layer_name=None, thresholds=DEFAULTS,
-        dict_path=None):
+        dict_path=None, gate_timeout=120):
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
     if results_dir is not None:
         os.makedirs(results_dir, exist_ok=True)
@@ -118,8 +121,9 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
         return {"status": "error", "outputs": [], "message": "sandbox required but unavailable"}
     cmd = _child_command(script_path, data_dir, out_dir, derived_dir=derived_dir, layer_dir=layer_dir)
     try:
+        _timeout = max(1, min(int(gate_timeout or 120), MAX_GATE_TIMEOUT))  # clamp regardless of source
         proc = subprocess.run(cmd, env=env, cwd=out_dir,
-                              capture_output=True, text=True, timeout=120)
+                              capture_output=True, text=True, timeout=_timeout)
     except subprocess.TimeoutExpired:
         audit.record({"script_hash": sh, "verdict": "error", "reason": "timeout"})
         return {"status": "error", "outputs": [], "message": "timeout"}
@@ -199,10 +203,12 @@ def main():
     ap.add_argument("--layer-dir", default=None)
     ap.add_argument("--layer-name", default=None)
     ap.add_argument("--dict", default="/var/gate/dict/dictionary.json")
+    ap.add_argument("--timeout", type=int, default=120,
+                    help="analysis wall-clock timeout in seconds (operator-set; hard-capped at 3600)")
     a = ap.parse_args()
     r = run(a.script, a.data_dir, a.out_dir, a.audit, a.queue, results_dir=a.results,
             derived_dir=a.derived_dir, layer_dir=a.layer_dir, layer_name=a.layer_name,
-            dict_path=a.dict)
+            dict_path=a.dict, gate_timeout=a.timeout)
     print(r["message"]); sys.exit(0 if r["status"] != "error" else 1)
 
 if __name__ == "__main__":

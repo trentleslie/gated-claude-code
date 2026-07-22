@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # Persistent, reattachable gated analyst. Close the tab / disconnect and re-run to reattach.
+# `--t <minutes>` (forwarded to the launcher, shell-quoted) applies when the session is first CREATED;
+# a bare reattach keeps the previously-set timeout.
 S=arivale
 if tmux has-session -t "$S" 2>/dev/null; then
   echo "reattaching existing session '$S' (Ctrl-b then d to detach)"
 else
   echo "starting new session '$S' (Ctrl-b then d to detach and leave it running)"
-  tmux new-session -d -s "$S" "claude-arivale-launch --dangerously-skip-permissions"
+  # shell-quote each forwarded arg so the tmux command string can't split or interpret them
+  cmd="claude-arivale-launch --dangerously-skip-permissions"
+  for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
+  tmux new-session -d -s "$S" "$cmd"
 fi
 exec tmux attach -t "$S"

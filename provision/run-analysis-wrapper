@@ -7,6 +7,10 @@ set -euo pipefail
 SCRIPT="$1"
 DATA_DIR=__GATED_CS_DATA_DIR__               # baked in at install by provision.sh; never from env/args
 OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
+# Operator-set analysis timeout (seconds). Written only by root at launch (claude-<label> --t);
+# cs-gated cannot write /etc/gated-cs. Validate to an integer here; the gate hard-caps it at 3600.
+GATE_TIMEOUT="$(cat /etc/gated-cs/gate_timeout_seconds 2>/dev/null || echo 120)"
+case "$GATE_TIMEOUT" in ''|*[!0-9]*) GATE_TIMEOUT=120;; esac
 exec env -i \
   PATH=/opt/gated-cs/bin:/usr/local/bin:/usr/bin:/bin \
   GATED_CS_REQUIRE_SANDBOX=1 \
@@ -15,4 +19,5 @@ exec env -i \
     --out-dir "$OUT_DIR" \
     --audit /var/gate/audit.jsonl \
     --queue /var/gate/queue \
-    --results /var/gate/results
+    --results /var/gate/results \
+    --timeout "$GATE_TIMEOUT"

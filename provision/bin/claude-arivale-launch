@@ -1,4 +1,35 @@
 #!/usr/bin/env bash
-# Launch the gated Arivale analyst as the cs-gated user. Any args are passed to claude.
-exec sudo -iu cs-gated env CLAUDE_FLAGS="$*" bash -lc \
-  'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; cd ~/analysis && exec claude $CLAUDE_FLAGS'
+# Launch the gated Arivale analyst as the cs-gated user. `--t <minutes>` sets the gate's analysis compute
+# timeout (operator-only: written to a root-owned config the gate reads, clamped to 1-60 min); absent --t
+# it resets to the 120s default. All other args pass through to claude with their boundaries preserved.
+#
+# CONCURRENCY: the timeout is a single root-owned global (/etc/gated-cs/gate_timeout_seconds) read by the
+# gate at submit time, not bound to a session. On a shared box the last launch wins; if two operators
+# launch concurrently the later value applies to both. These boxes are single-operator in practice; a
+# per-submission timeout would require threading the value through submit-analysis.
+CONF=/etc/gated-cs/gate_timeout_seconds
+mins=""; rest=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --t) [ $# -ge 2 ] || { echo "claude-arivale: --t needs a value in minutes (e.g. --t 20)" >&2; exit 2; }
+         mins="$2"; shift 2 ;;
+    --t=*) mins="${1#--t=}"; shift ;;
+    *) rest+=("$1"); shift ;;
+  esac
+done
+if [ -n "$mins" ]; then
+  case "$mins" in ''|*[!0-9]*) echo "claude-arivale: --t needs whole minutes (e.g. --t 20)" >&2; exit 2 ;; esac
+  [ "$mins" -lt 1 ] && mins=1; [ "$mins" -gt 60 ] && mins=60
+  secs=$((mins * 60))
+else
+  secs=120
+fi
+if mkdir -p "$(dirname "$CONF")" 2>/dev/null && printf '%s\n' "$secs" > "$CONF" 2>/dev/null; then
+  chmod 0644 "$CONF" 2>/dev/null || true
+  echo "gate analysis timeout: ${secs}s"
+else
+  echo "warning: could not write $CONF (run as root to use --t); gate keeps its current timeout" >&2
+fi
+# positional passthrough preserves argument boundaries across the sudo/bash -lc boundary
+exec sudo -iu cs-gated env bash -lc \
+  'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; cd ~/analysis && exec claude "$@"' claude-arivale "${rest[@]}"
