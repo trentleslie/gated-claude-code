@@ -113,6 +113,18 @@ def _render_md(d):
                 if cov:
                     note = f"{cov['min_month']}→{cov['max_month']}, {cov['cadence']}" + (
                         f"; {note}" if note else "")
+                fmt = c.get("format")
+                if fmt:
+                    # value-free template (+ mixed-format flag) only
+                    ftxt = f"fmt=`{fmt['template']}`" + (" (mixed)" if fmt.get("mixed") else "")
+                    note = f"{note}; {ftxt}" if note else ftxt
+                td = c.get("temporal_distribution")
+                if td:
+                    # aggregate-only summary: coarse diurnal peak + coverage rate, no raw values
+                    peak = max(td["diurnal_blocks"], key=td["diurnal_blocks"].get) \
+                        if td.get("diurnal_blocks") else "?"
+                    dtxt = f"struct: peak {peak}h, active {td['active_day_rate']:.0%}"
+                    note = f"{note}; {dtxt}" if note else dtxt
                 out.append(f"| {cname} | {c['dtype']} | {c['pct_missing']} | "
                            f"{c['cardinality']} | {c.get('sensitive', False)} | {note} |\n")
             if prof.get("role") == "codebook":
