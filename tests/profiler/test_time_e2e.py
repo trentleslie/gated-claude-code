@@ -52,3 +52,34 @@ def test_no_raw_values_and_kanon_hold(tmp_path):
     # 6. the DOB column gets NO temporal_coverage facet at all (birth month must never surface)
     dob = d["files"][os.path.join("redcap_demographics", "TIME_redcap_demographics.csv")]["columns"]["date_of_birth"]
     assert "temporal_coverage" not in dob
+    # 6b. DOB carries no NEW temporal facets either (format/temporal_distribution)
+    assert "format" not in dob and "temporal_distribution" not in dob
+
+
+def test_new_temporal_facets_are_leak_free(tmp_path):
+    data_dir = _mk(tmp_path)
+    out = str(tmp_path / "out")
+    build(data_dir, out_dir=out, thresholds=DEFAULTS)
+
+    dict_json = open(os.path.join(out, "dictionary.json")).read()
+    md = open(os.path.join(out, "dictionary.md")).read()
+    d = json.load(open(os.path.join(out, "dictionary.json")))
+    ts = d["files"][os.path.join("oura_ring", "TIME_oura_heartrate.csv")]["columns"]["timestamp"]
+
+    # format template is value-free (no literal digits anywhere in the descriptor templates)
+    fmt = ts["format"]
+    templates = [fmt["template"]] + [m["template"] for m in fmt.get("minority", [])]
+    for t in templates:
+        assert not re.search(r"\d", t), f"format template leaks digits: {t}"
+
+    # temporal_distribution carries only aggregates, no absolute calendar date
+    td = ts["temporal_distribution"]
+    assert "2025" not in json.dumps(td)                    # enrollment-relative only
+    for hist_key in ("session_minutes", "gap_hours", "coverage_days"):
+        for b in td[hist_key]:
+            assert b["count"] >= DEFAULTS.bin_min_count     # bin suppression holds
+    assert td["n_contributors"] >= DEFAULTS.k               # k-gate holds
+
+    # the value-free template surfaces in md; no raw timestamp value does
+    assert fmt["template"] in md
+    assert "2025-01-01 00:00:00" not in (dict_json + md)
