@@ -44,6 +44,20 @@ Workflow for **every** analysis:
 6. To hand the analysis to JupyterLab for a full real-data run, use `/jupyter analyses/<NN-slug>/<slug>.py`;
    the notebook lands beside the script and syncs to JupyterLab automatically.
 
+## JupyterLab kernel environment (real-data runs)
+When the operator runs a `/jupyter` notebook against the real data, the JupyterLab kernel is a Python 3.13
+environment with the scientific stack preinstalled — write notebook and analysis code against these
+directly, with no install step:
+- **Compute / stats:** `numpy`, `pandas`, `scipy`, `scikit-learn`, `statsmodels`
+- **Plotting:** `matplotlib`, `seaborn`, `plotly`
+- **I/O:** `pyarrow` (Parquet), `openpyxl` (`.xlsx`)
+
+`scipy`, `scikit-learn`, and `statsmodels` are pinned to the same versions as the gate's
+`submit-analysis` venv, so those parts of a notebook reproduce the gated run faithfully. The remaining
+packages (`numpy`, `pandas`, and the plotting/I-O libraries) are available but are **not** guaranteed to
+be version-matched to the gate venv — do not rely on version-specific `numpy`/`pandas` behavior to carry
+identically between the two.
+
 ## Reading tables & the gate
 Scripts read tables from `$DATA_DIR` (set at run time; real files are TAB-delimited, 13 leading `#`
 metadata lines, header on line 14 → `pd.read_csv(path, sep="\t", skiprows=13, low_memory=False)`;
