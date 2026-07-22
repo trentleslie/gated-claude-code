@@ -52,8 +52,11 @@ directly, with no install step:
 - **Plotting:** `matplotlib`, `seaborn`, `plotly`
 - **I/O:** `pyarrow` (Parquet), `openpyxl` (`.xlsx`)
 
-The compute/stats libraries are pinned to the same versions as the gate's `submit-analysis` venv, so a
-notebook reproduces the gated run faithfully — a script that runs through the gate runs unchanged here.
+`scipy`, `scikit-learn`, and `statsmodels` are pinned to the same versions as the gate's
+`submit-analysis` venv, so those parts of a notebook reproduce the gated run faithfully. The remaining
+packages (`numpy`, `pandas`, and the plotting/I-O libraries) are available but are **not** guaranteed to
+be version-matched to the gate venv — do not rely on version-specific `numpy`/`pandas` behavior to carry
+identically between the two.
 
 ## Reading tables & the gate
 Scripts read tables from `$DATA_DIR` (set at run time; real files are TAB-delimited, 13 leading `#`
