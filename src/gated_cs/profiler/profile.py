@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from .parse import parse_file
 from .subject_key import detect_subject_key, cohort_n
-from .temporal import is_datetime_name, is_birth_name, month_bounds, cadence_label
+from .temporal import is_datetime_name, is_birth_name, month_bounds, cadence_label, epoch_unit
 from .format_detect import detect_format
 from .temporal_dist import temporal_distribution
 from ..config import DEFAULTS
@@ -77,26 +77,38 @@ def _attach_facets(df, parsed, cols, thresholds, sample_rows):
     sid_sample = df[subject_key].head(sample_rows) if subject_key else None
     for name in parsed.header:
         if pd.api.types.is_numeric_dtype(df[name]):
-            continue  # e.g. int-seconds duration columns whose NAME matches the datetime pattern
-        if not is_datetime_name(name) and not pd.api.types.is_datetime64_any_dtype(df[name]):
-            continue
+            # A numeric column is a timestamp only if its NAME is datetime-like AND its
+            # magnitude decodes as a Unix epoch — otherwise it is a duration/measure
+            # column (e.g. int-seconds) and must be skipped.
+            unit = epoch_unit(df[name]) if is_datetime_name(name) else None
+            if unit is None:
+                continue
+            ts_dt = pd.to_datetime(df[name], errors="coerce", unit=unit, utc=True)
+        else:
+            if not is_datetime_name(name) and not pd.api.types.is_datetime64_any_dtype(df[name]):
+                continue
+            ts_dt = pd.to_datetime(df[name], errors="coerce", utc=True, format="mixed")
         if is_birth_name(name):
             continue  # birth month is a quasi-identifier, not longitudinal coverage — never emit
-        ts = pd.to_datetime(df[name], errors="coerce", utc=True, format="mixed").dropna()
+        ts = ts_dt.dropna()
         if ts.empty:
             continue
         cov = month_bounds(ts.min(), ts.max())
         cov["n_timestamps"] = int(ts.shape[0])
-        cov["cadence"] = cadence_label(df[name].head(sample_rows), sid_sample)
+        # Pass the PARSED datetime (works for epoch + string alike); cadence_label's
+        # internal to_datetime is a no-op on datetime64 input.
+        cov["cadence"] = cadence_label(ts_dt.head(sample_rows), sid_sample)
         cols[name]["temporal_coverage"] = cov
-        # R1/R2/R3: per-column, value-free format descriptor.
+        # R1/R2/R3: per-column, value-free format descriptor (raw values — detect_format
+        # reads epoch ints via str(), so it stays correct for numeric epoch columns).
         fmt = detect_format(df[name], sid=df[subject_key] if subject_key else None,
                             thresholds=thresholds)
         if fmt is not None:
             cols[name]["format"] = fmt
         # R4-R16: cohort temporal-structure distribution (needs subject grouping).
         if subject_key is not None:
-            td = temporal_distribution(df, name, subject_key, thresholds)
+            td = temporal_distribution(df, name, subject_key, thresholds,
+                                       ts_values=ts_dt.values)
             if td is not None:
                 cols[name]["temporal_distribution"] = td
     return subject_key, cn

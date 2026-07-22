@@ -104,3 +104,19 @@ def test_template_has_no_literal_value_digits():
 
 def test_empty_column_returns_none():
     assert detect_format(pd.Series([None, None], dtype="object")) is None
+
+
+# ---- Greptile P1: the WHOLE descriptor is k-gated, not just minority formats ----
+
+def test_dominant_format_suppressed_below_k():
+    # a column contributed by < k subjects discloses no format descriptor at all
+    s = pd.Series([f"2025-01-01T0{h}:00:00Z" for h in range(6)])
+    sid = pd.Series([f"S{i:03d}" for i in range(3) for _ in range(2)])   # 3 subjects < k=5
+    assert detect_format(s, sid=sid, thresholds=DEFAULTS) is None
+
+
+def test_dominant_format_disclosed_at_or_above_k():
+    s = pd.Series([f"2025-01-01T0{h % 6}:00:00Z" for h in range(10)])
+    sid = pd.Series([f"S{i:03d}" for i in range(5) for _ in range(2)])   # 5 subjects >= k
+    d = detect_format(s, sid=sid, thresholds=DEFAULTS)
+    assert d is not None and d["representation"] == "iso8601"

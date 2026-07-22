@@ -35,8 +35,14 @@ _CADENCE_SECONDS = {
     "unknown": 3600,
 }
 
-_PER_SUBJECT_MIN = 24
-_PER_SUBJECT_MAX = 48
+# Target rows per synthetic subject when allocating the n_rows budget across subjects.
+_PER_SUBJECT_TARGET = 30
+
+# Non-disclosive default format for datetime-named columns whose real descriptor was
+# suppressed (< k subjects) or never detected — keeps synthetic timestamps parseable
+# (never the old date-only path) without disclosing the column's real format shape.
+_DEFAULT_FMT = {"representation": "iso8601", "granularity": "datetime",
+                "separator": "T", "timezone": "utc"}
 
 
 # ---------------------------------------------------------------- rendering ----
@@ -107,9 +113,10 @@ def _draw_values(name, col, count, rng):
     if "int" in dtype or "float" in dtype:
         vals = [rng.uniform(0, 100) for _ in range(count)]
         return [int(round(v)) for v in vals] if "int" in dtype else [round(v, 3) for v in vals]
-    if _DATE_NAME.search(name):        # sensitive date column with no captured format
-        return ["20%02d-%02d-%02d" % (rng.randint(15, 20), rng.randint(1, 12), rng.randint(1, 28))
-                for _ in range(count)]
+    if _DATE_NAME.search(name):        # datetime-named col with no captured format
+        # non-disclosive default ISO format (never the old date-only random path)
+        cov = col.get("temporal_coverage")
+        return [_render_ts(_DEFAULT_FMT, _rand_dt(rng, cov)) for _ in range(count)]
     tag = re.sub(r"[^A-Za-z0-9]", "", name)[:8] or "col"
     return ["FAKE_%s_%04d" % (tag, rng.randint(0, 9999)) for _ in range(count)]
 
@@ -145,41 +152,66 @@ def _synthesize_iid(cols, n_rows, seed, jk, id_pool):
     return pd.DataFrame(data)
 
 
-def _synthesize_joint(cols, n_rows, seed, subject_col, id_pool, primary_name):
-    rng = random.Random(seed)
-    primary = cols[primary_name]
-    dist = primary.get("temporal_distribution") or {}
-    cov = primary.get("temporal_coverage") or {}
-    primary_fmt = primary.get("format") or {
-        "representation": "iso8601", "granularity": "datetime",
-        "separator": "T", "timezone": "utc"}
-    minority = primary_fmt.get("minority", [])
-
-    cadence_s = _CADENCE_SECONDS.get(dist.get("cadence"), 3600)
+def _subject_timeline(rng, dist, cov, want):
+    """Exactly ``want`` sorted timestamps within the captured month range, shaped by
+    the column's OWN cadence / diurnal / session structure (R8). Each timestamp column
+    calls this with its own distribution, so a secondary column is not a copy of the
+    primary's timeline."""
+    if want <= 0:
+        return []
+    dist = dist or {}
     min_start, max_end = _range(cov)
     total_days = max(1, (max_end - min_start).days)
+    cadence_s = _CADENCE_SECONDS.get(dist.get("cadence"), 3600)
+    diurnal = dist.get("diurnal_blocks")
+    n_sessions = max(1, min(rng.randint(2, 4), total_days + 1, want))
+    day_offsets = sorted(rng.sample(range(total_days + 1), n_sessions))   # distinct -> gaps
+    base, rem = divmod(want, n_sessions)
+    dts = []
+    for k_i, off in enumerate(day_offsets):
+        npts = base + (1 if k_i < rem else 0)
+        if npts <= 0:
+            continue
+        hour = _pick_hour(rng, diurnal)
+        t0 = min_start + pd.Timedelta(days=off, hours=hour, minutes=rng.randint(0, 59))
+        for i in range(npts):
+            t = t0 + pd.Timedelta(seconds=cadence_s * i)
+            dts.append(t if t <= max_end else max_end)   # stay inside captured range
+    dts = sorted(dts)[:want]
+    return dts or [min_start]
 
-    n_subjects = min(len(id_pool), max(2, n_rows // 30))
+
+def _synthesize_joint(cols, n_rows, seed, subject_col, id_pool, primary_name):
+    rng = random.Random(seed)
+    ts_names = [n for n, c in cols.items() if _is_ts_col(c)]
+    primary = cols[primary_name]
+    primary_fmt = primary.get("format") or _DEFAULT_FMT
+    minority = primary_fmt.get("minority", [])
+
+    # Allocate the n_rows budget across subjects so the TOTAL row count == n_rows
+    # (honor the n_rows contract), while each subject still gets a coherent block.
+    n_subjects = max(1, min(len(id_pool), max(1, n_rows // _PER_SUBJECT_TARGET)))
+    base, rem = divmod(n_rows, n_subjects)
+    counts = [base + (1 if i < rem else 0) for i in range(n_subjects)]
     subjects = id_pool[:n_subjects]
     blocks = {name: [] for name in cols}
 
     for si, sid in enumerate(subjects):
-        r = rng.randint(_PER_SUBJECT_MIN, _PER_SUBJECT_MAX)
-        n_sessions = min(rng.randint(2, 4), total_days + 1)
-        day_offsets = sorted(rng.sample(range(total_days + 1), n_sessions))  # distinct -> gaps
-        base, rem = divmod(r, n_sessions)
-        dts = []
-        for k_i, off in enumerate(day_offsets):
-            npts = base + (1 if k_i < rem else 0)
-            if npts <= 0:
+        want = counts[si]
+        if want <= 0:
+            continue
+        # primary column fixes this subject's row count; secondaries align to it.
+        primary_dts = _subject_timeline(rng, primary.get("temporal_distribution"),
+                                        primary.get("temporal_coverage"), want)
+        rr = len(primary_dts)
+        col_dts = {primary_name: primary_dts}
+        for tname in ts_names:
+            if tname == primary_name:
                 continue
-            hour = _pick_hour(rng, dist.get("diurnal_blocks"))
-            t0 = min_start + pd.Timedelta(days=off, hours=hour, minutes=rng.randint(0, 59))
-            dts.extend(t0 + pd.Timedelta(seconds=cadence_s * i) for i in range(npts))
-        dts = sorted(dts)
-        # keep every subject's stamps inside the captured month range
-        dts = [d for d in dts if d <= max_end] or [min_start]
-        rr = len(dts)
+            tcol = cols[tname]
+            d = _subject_timeline(rng, tcol.get("temporal_distribution"),
+                                  tcol.get("temporal_coverage"), rr)
+            col_dts[tname] = (d + [d[-1]] * rr)[:rr]     # force exact row alignment
 
         # per-subject format for the primary column so every RETAINED format is emitted
         # (a < k minority was already dropped from the descriptor and never reappears).
@@ -192,7 +224,7 @@ def _synthesize_joint(cols, n_rows, seed, subject_col, id_pool, primary_name):
                 blocks[name].extend([sid] * rr)
             elif _is_ts_col(col):
                 fmt = subj_primary_fmt if name == primary_name else (col.get("format") or primary_fmt)
-                blocks[name].extend(_render_ts(fmt, d) for d in dts)
+                blocks[name].extend(_render_ts(fmt, d) for d in col_dts[name])
             else:
                 blocks[name].extend(_draw_values(name, col, rr, rng))
     return pd.DataFrame(blocks)

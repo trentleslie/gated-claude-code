@@ -130,8 +130,9 @@ def test_retained_minority_format_emitted_and_subk_never(tmp_path):
 
 
 def test_ksuppressed_column_renders_format_correct_no_date_only_regression(tmp_path):
-    # column with a format facet but distribution suppressed (< k subjects) still
-    # renders format-correct timestamps, never the old date-only random path.
+    # A < k-subject timestamp column has BOTH its distribution AND its format descriptor
+    # suppressed (R11/R15). Synthesis must still render a parseable, non-disclosive DEFAULT
+    # ISO format — never the old date-only random path.
     rows = [{"subject_id": f"S{s:03d}",
              "timestamp": (pd.Timestamp("2025-01-01") + pd.Timedelta(days=d, hours=8 + h)
                            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -140,10 +141,44 @@ def test_ksuppressed_column_renders_format_correct_no_date_only_regression(tmp_p
     p = tmp_path / "few.csv"
     pd.DataFrame(rows).to_csv(p, index=False)
     prof = profile_file(str(p))
-    assert "temporal_distribution" not in prof["columns"]["timestamp"]  # suppressed
+    assert "temporal_distribution" not in prof["columns"]["timestamp"]  # suppressed (R11)
+    assert "format" not in prof["columns"]["timestamp"]                 # suppressed (R15, < k)
     df = synthesize(prof, n_rows=60, seed=0, join_keys=("subject_id",), id_pool=POOL)
     ts = df["timestamp"].astype(str)
-    assert ts.str.endswith("Z").all()                   # format-correct, not date-only
+    assert ts.str.match(r"^\d{4}-\d{2}-\d{2}T").all()   # default ISO datetime, not date-only
+
+
+# ---------- Greptile P1: joint path honors the n_rows contract ----------
+
+def test_joint_output_row_count_equals_n_rows(tmp_path):
+    prof = _longitudinal_profile(tmp_path)
+    for n in (1, 37, 60, 100, 200):
+        df = synthesize(prof, n_rows=n, seed=0, join_keys=("subject_id",), id_pool=POOL)
+        assert len(df) == n, f"n_rows={n} produced {len(df)} rows"
+
+
+# ---------- Greptile P1: each timestamp column uses its own captured timeline ----------
+
+def test_secondary_timestamp_column_uses_own_distribution(tmp_path):
+    rows = []
+    for s in range(12):
+        for d in range(6):
+            for h in range(5):
+                base = pd.Timestamp("2025-01-01") + pd.Timedelta(days=d, hours=8 + h)
+                rows.append({"subject_id": f"S{s:03d}",
+                             "event_time": base.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                             # secondary column lives ~5 months later -> a different range
+                             "sample_time": (base + pd.Timedelta(days=150)).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    p = tmp_path / "two_ts.csv"
+    pd.DataFrame(rows).to_csv(p, index=False)
+    prof = profile_file(str(p))
+    assert "temporal_distribution" in prof["columns"]["event_time"]
+    assert "temporal_distribution" in prof["columns"]["sample_time"]
+    df = synthesize(prof, n_rows=120, seed=0, join_keys=("subject_id",), id_pool=POOL)
+    assert not df["event_time"].equals(df["sample_time"])          # not a byte-copy
+    pm = set(pd.to_datetime(df["event_time"], format="mixed", utc=True).dt.month)
+    sm = set(pd.to_datetime(df["sample_time"], format="mixed", utc=True).dt.month)
+    assert pm != sm                                                # each reflects its own range
 
 
 # ---------- Unit 6: value co-location ----------

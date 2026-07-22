@@ -53,3 +53,17 @@ def test_profile_file_numeric_duration_column_skips_temporal_coverage(tmp_path):
     resting = prof["columns"]["resting_time"]
     assert "temporal_coverage" not in resting  # int seconds, not a real datetime
     assert resting["dtype"].startswith("int")  # still profiled normally
+
+
+def test_numeric_epoch_timestamp_is_profiled(tmp_path):
+    # Greptile P1: an epoch-seconds int column named 'timestamp' must be detected as a
+    # timestamp (format + temporal capture), not skipped as a generic numeric column.
+    base = int(pd.Timestamp("2025-03-01").timestamp())
+    rows = [{"subject_id": f"S{sid:03d}", "timestamp": base + i * 3600, "hr": 60}
+            for sid in range(10) for i in range(30)]          # hourly epoch seconds
+    p = tmp_path / "epoch.csv"
+    pd.DataFrame(rows).to_csv(p, index=False)
+    ts = profile_file(str(p), DEFAULTS)["columns"]["timestamp"]
+    assert ts.get("format", {}).get("representation") == "epoch_s"
+    assert "temporal_distribution" in ts                      # epoch col gets temporal capture
+    assert ts["temporal_coverage"]["min_month"] == "2025-03"

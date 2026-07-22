@@ -78,3 +78,21 @@ def test_bins_respect_bin_min_count():
     for hist_key in ("session_minutes", "gap_hours", "coverage_days"):
         for b in td[hist_key]:
             assert b["count"] >= DEFAULTS.bin_min_count
+
+
+# ---- Greptile P1: a diurnal block with < k contributing subjects is suppressed ----
+
+def test_diurnal_singleton_block_suppressed():
+    rows = []
+    for s in range(8):                       # 8 subjects active midday -> blocks survive
+        for d in range(4):
+            for h in (10, 11, 12, 13):
+                rows.append({"subject_id": f"S{s:03d}",
+                             "timestamp": pd.Timestamp("2025-01-01") + pd.Timedelta(days=d, hours=h)})
+    for d in range(4):                       # one lone subject active at 02:00 (00-04 block)
+        rows.append({"subject_id": "S000",
+                     "timestamp": pd.Timestamp("2025-01-01") + pd.Timedelta(days=d, hours=2)})
+    td = temporal_distribution(pd.DataFrame(rows), "timestamp", "subject_id", DEFAULTS)
+    assert td is not None
+    assert td["diurnal_blocks"]["00-04"] == 0.0            # sole-contributor block zeroed
+    assert sum(td["diurnal_blocks"].values()) > 0          # midday blocks survive

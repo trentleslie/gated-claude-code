@@ -55,11 +55,15 @@ def _clip_hist(values, thresholds):
     return out
 
 
-def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS):
+def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS, ts_values=None):
+    # ``ts_values`` (parsed datetime64, aligned to df) is supplied by the caller for
+    # epoch-numeric columns, which the default format="mixed" parse cannot decode.
+    if ts_values is None:
+        ts_values = pd.to_datetime(df[name], errors="coerce", utc=True, format="mixed").values
     # Subject-aligned frame (NOT a head-slice) so large files aren't truncated/distorted.
     frame = pd.DataFrame({
         "sid": df[subject_key].values,
-        "ts": pd.to_datetime(df[name], errors="coerce", utc=True, format="mixed").values,
+        "ts": ts_values,
     }).dropna(subset=["ts"])
     if frame.empty:
         return None
@@ -74,6 +78,7 @@ def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS):
     block_w = thresholds.diurnal_block_hours
     n_blocks = 24 // block_w
     diurnal_counts = np.zeros(n_blocks, dtype=float)
+    diurnal_contrib = np.zeros(n_blocks, dtype=int)   # distinct subjects per block (R11/R13)
 
     per_subject_medians = []            # for cohort cadence label
     session_minutes = []               # ephemeral, collapsed below
@@ -83,10 +88,16 @@ def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS):
 
     for _, g in frame.groupby("sid", sort=False):
         ts = pd.Series(pd.to_datetime(g["ts"])).sort_values().reset_index(drop=True)
-        # diurnal (all stamps contribute to cohort blocks)
+        # diurnal: count events, and track distinct-subject contribution per block so a
+        # block filled by a single subject (their unique activity window) can be suppressed.
         hours = ts.dt.hour.to_numpy()
+        subj_blocks = set()
         for h in hours:
-            diurnal_counts[int(h) // block_w] += 1
+            b = int(h) // block_w
+            diurnal_counts[b] += 1
+            subj_blocks.add(b)
+        for b in subj_blocks:
+            diurnal_contrib[b] += 1
         # enrollment-relative coverage
         span_days = (ts.iloc[-1] - ts.iloc[0]).total_seconds() / 86400.0
         active_days = ts.dt.normalize().nunique()
@@ -112,6 +123,9 @@ def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS):
 
     cohort_cadence = bucket_cadence(
         float(np.median(per_subject_medians)) if per_subject_medians else None)
+    # R11/R13: suppress any block with < k contributing subjects (a singleton block
+    # reveals one subject's unique activity window), then normalize over survivors.
+    diurnal_counts[diurnal_contrib < thresholds.k] = 0.0
     total = diurnal_counts.sum()
     diurnal_blocks = {
         f"{b * block_w:02d}-{(b + 1) * block_w:02d}":

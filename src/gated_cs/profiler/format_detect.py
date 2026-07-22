@@ -86,16 +86,25 @@ def detect_format(series, sid=None, thresholds=DEFAULTS):
     for sig in sigs:
         by_template.setdefault(sig["template"], sig)
 
-    # subject count per distinct template (k-anon basis)
+    order = templates.value_counts()          # by occurrence -> dominant is index[0]
+    dominant = order.index[0]
+
+    # subject count per distinct template + column-level contributor count (k-anon basis)
     if sid is not None:
         sid_al = pd.Series(sid).reindex(templates.index)
         frame = pd.DataFrame({"t": templates.values, "sid": sid_al.values})
         subj_count = {t: int(g["sid"].nunique(dropna=True)) for t, g in frame.groupby("t")}
+        col_contrib = int(sid_al.nunique(dropna=True))
     else:
-        subj_count = {t: int(c) for t, c in templates.value_counts().items()}
+        subj_count = {t: int(c) for t, c in order.items()}
+        col_contrib = int(templates.shape[0])      # occurrences stand in for subjects
 
-    order = templates.value_counts()          # by occurrence -> dominant is index[0]
-    dominant = order.index[0]
+    # R11/R15: gate the WHOLE descriptor, not just minority formats. A column
+    # contributed by < k subjects discloses its representation/timezone/precision/
+    # mixed-state as a quasi-identifier — suppress it entirely.
+    if col_contrib < k:
+        return None
+
     desc = dict(by_template[dominant])
     minority = [by_template[t] for t in order.index[1:] if subj_count.get(t, 0) >= k]
     desc["mixed"] = len(order) > 1
