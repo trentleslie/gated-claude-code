@@ -96,3 +96,26 @@ def test_diurnal_singleton_block_suppressed():
     assert td is not None
     assert td["diurnal_blocks"]["00-04"] == 0.0            # sole-contributor block zeroed
     assert sum(td["diurnal_blocks"].values()) > 0          # midday blocks survive
+
+
+# ---- Offline re-id gate: histogram bins gated by DISTINCT SUBJECT count, not just events ----
+
+def test_histogram_bin_requires_k_distinct_subjects():
+    # 6 subjects (>= k) so a distribution is emitted, but only 2 of them have the dense
+    # sub-hour cadence that produces many short-gap events. Those <k-subject bins must be
+    # dropped even though their event count easily clears bin_min_count.
+    rows = []
+    for s in range(6):
+        # everyone: one reading per day for 40 days (daily gaps, all subjects contribute)
+        for d in range(40):
+            rows.append({"subject_id": f"S{s:03d}",
+                         "timestamp": pd.Timestamp("2025-01-01") + pd.Timedelta(days=d, hours=9)})
+    for s in range(2):                        # only 2 subjects add a burst of 5-min readings
+        for i in range(60):
+            rows.append({"subject_id": f"S{s:03d}",
+                         "timestamp": pd.Timestamp("2025-02-01") + pd.Timedelta(minutes=5 * i)})
+    td = temporal_distribution(pd.DataFrame(rows), "timestamp", "subject_id", DEFAULTS)
+    assert td is not None
+    for key in ("session_minutes", "gap_hours", "coverage_days"):
+        for b in td[key]:
+            assert b["n_subjects"] >= DEFAULTS.k, f"{key} bin {b} has < k contributing subjects"

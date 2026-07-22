@@ -31,27 +31,40 @@ _SESSION_GAP_FACTOR = 4.0
 _SINGLE_EVENT_TOL = 1.1
 
 
-def _clip_hist(values, thresholds):
-    """Percentile-clipped, nice-edge, bin_min_count-gated histogram (R12)."""
+def _clip_hist(pairs, thresholds):
+    """Percentile-clipped, nice-edge histogram over (value, subject_id) pairs.
+
+    A bin is disclosed only if it has BOTH >= bin_min_count events AND >= k distinct
+    contributing subjects (R11/R12). The subject gate matters because one subject can
+    emit many sessions/gaps: an event-count-only gate lets a bin clear the bar while
+    representing 1-4 people, disclosing their timing pattern (found by the offline
+    re-id gate on real data, 2026-07-22)."""
     from .profile import _nice_edges     # lazy: profile imports this module at top
-    v = np.asarray([x for x in values if np.isfinite(x)], dtype=float)
-    if v.size < 2 or np.unique(v).size < 2:
+    arr = [(float(x), s) for x, s in pairs if np.isfinite(x)]
+    if len(arr) < 2:
+        return []
+    v = np.array([x for x, _ in arr], dtype=float)
+    sids = np.array([s for _, s in arr], dtype=object)
+    if np.unique(v).size < 2:
         return []
     lo, hi = float(np.percentile(v, 5)), float(np.percentile(v, 95))
     if hi <= lo:
         return []
-    v = v[(v >= lo) & (v <= hi)]
+    m = (v >= lo) & (v <= hi)
+    v, sids = v[m], sids[m]
     if v.size < 2 or np.unique(v).size < 2:
         return []
     edges = _nice_edges(lo, hi, thresholds)
-    counts = pd.cut(pd.Series(v), bins=edges, include_lowest=True,
-                    right=False).value_counts().sort_index()
+    idx = pd.cut(pd.Series(v), bins=edges, include_lowest=True, right=False)
     out = []
-    for interval, count in counts.items():
-        if int(count) >= thresholds.bin_min_count:
+    for interval in idx.cat.categories:
+        sel = (idx == interval).to_numpy()
+        cnt = int(sel.sum())
+        nsub = int(pd.unique(sids[sel]).size)
+        if cnt >= thresholds.bin_min_count and nsub >= thresholds.k:
             out.append({"lo": round(float(interval.left), 4),
                         "hi": round(float(interval.right), 4),
-                        "count": int(count)})
+                        "count": cnt, "n_subjects": nsub})
     return out
 
 
@@ -81,12 +94,12 @@ def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS, ts_values=
     diurnal_contrib = np.zeros(n_blocks, dtype=int)   # distinct subjects per block (R11/R13)
 
     per_subject_medians = []            # for cohort cadence label
-    session_minutes = []               # ephemeral, collapsed below
-    gap_hours = []
-    coverage_days = []
+    session_pairs = []                 # (value, sid) — ephemeral, collapsed + subject-gated below
+    gap_pairs = []
+    coverage_pairs = []
     active_day_rates = []
 
-    for _, g in frame.groupby("sid", sort=False):
+    for sid_val, g in frame.groupby("sid", sort=False):
         ts = pd.Series(pd.to_datetime(g["ts"])).sort_values().reset_index(drop=True)
         # diurnal: count events, and track distinct-subject contribution per block so a
         # block filled by a single subject (their unique activity window) can be suppressed.
@@ -101,7 +114,7 @@ def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS, ts_values=
         # enrollment-relative coverage
         span_days = (ts.iloc[-1] - ts.iloc[0]).total_seconds() / 86400.0
         active_days = ts.dt.normalize().nunique()
-        coverage_days.append(span_days)
+        coverage_pairs.append((span_days, sid_val))
         active_day_rates.append(active_days / (span_days + 1.0) if span_days >= 0 else 1.0)
         if ts.shape[0] < 2:
             continue
@@ -114,12 +127,12 @@ def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS, ts_values=
         session_start = 0
         for i, d in enumerate(deltas):
             if d > gap_break:
-                gap_hours.append(d / 3600.0)
+                gap_pairs.append((d / 3600.0, sid_val))
                 seg = ts.iloc[session_start:i + 1]
-                session_minutes.append((seg.iloc[-1] - seg.iloc[0]).total_seconds() / 60.0)
+                session_pairs.append(((seg.iloc[-1] - seg.iloc[0]).total_seconds() / 60.0, sid_val))
                 session_start = i + 1
         seg = ts.iloc[session_start:]
-        session_minutes.append((seg.iloc[-1] - seg.iloc[0]).total_seconds() / 60.0)
+        session_pairs.append(((seg.iloc[-1] - seg.iloc[0]).total_seconds() / 60.0, sid_val))
 
     cohort_cadence = bucket_cadence(
         float(np.median(per_subject_medians)) if per_subject_medians else None)
@@ -136,9 +149,9 @@ def temporal_distribution(df, name, subject_key, thresholds=DEFAULTS, ts_values=
     return {
         "n_contributors": contributor_n,
         "cadence": cohort_cadence,
-        "session_minutes": _clip_hist(session_minutes, thresholds),
-        "gap_hours": _clip_hist(gap_hours, thresholds),
+        "session_minutes": _clip_hist(session_pairs, thresholds),
+        "gap_hours": _clip_hist(gap_pairs, thresholds),
         "diurnal_blocks": diurnal_blocks,
-        "coverage_days": _clip_hist(coverage_days, thresholds),
+        "coverage_days": _clip_hist(coverage_pairs, thresholds),
         "active_day_rate": round(float(np.mean(active_day_rates)), 4) if active_day_rates else 0.0,
     }
