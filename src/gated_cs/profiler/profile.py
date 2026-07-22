@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from .parse import parse_file
 from .subject_key import detect_subject_key, cohort_n
-from .temporal import is_datetime_name, month_bounds, cadence_label
+from .temporal import is_datetime_name, is_birth_name, month_bounds, cadence_label
 from ..config import DEFAULTS
 
 def _nice_step(span, target_bins=10):
@@ -78,6 +78,8 @@ def _attach_facets(df, parsed, cols, thresholds, sample_rows):
             continue  # e.g. int-seconds duration columns whose NAME matches the datetime pattern
         if not is_datetime_name(name) and not pd.api.types.is_datetime64_any_dtype(df[name]):
             continue
+        if is_birth_name(name):
+            continue  # birth month is a quasi-identifier, not longitudinal coverage — never emit
         ts = pd.to_datetime(df[name], errors="coerce", utc=True, format="mixed").dropna()
         if ts.empty:
             continue

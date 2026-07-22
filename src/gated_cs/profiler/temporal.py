@@ -3,6 +3,9 @@ import numpy as np
 import pandas as pd
 
 _DATETIME_NAME = re.compile(r"date|time|timestamp|_at$", re.I)
+# birth/DOB columns match _DATETIME_NAME but hold one date per subject, so their
+# month bounds ARE the subjects' birth months — a quasi-identifier, not cohort coverage.
+_BIRTH_NAME = re.compile(r"dob|birth", re.I)
 
 # (upper-bound seconds, label); first bucket whose bound >= median wins
 _CADENCE_BUCKETS = (
@@ -17,6 +20,9 @@ _CADENCE_BUCKETS = (
 
 def is_datetime_name(name: str) -> bool:
     return bool(_DATETIME_NAME.search(name or ""))
+
+def is_birth_name(name: str) -> bool:
+    return bool(_BIRTH_NAME.search(name or ""))
 
 def month_bounds(min_ts, max_ts) -> dict:
     if pd.isna(min_ts) or pd.isna(max_ts):

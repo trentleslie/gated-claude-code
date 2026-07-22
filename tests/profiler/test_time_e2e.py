@@ -38,8 +38,10 @@ def test_no_raw_values_and_kanon_hold(tmp_path):
     #    and ids are positively remapped to the SYNTH_ pool (not silently dropped)
     assert "S00" not in blob and "S06" not in blob and "S11" not in blob
     assert re.search(r"SYNTH_\d{4}", all_synth)
-    # 3. exact DOB never leaks; date column suppressed
+    # 3. exact DOB never leaks; date column suppressed. Birth MONTH is a quasi-identifier
+    #    too, so the DOB column must carry no temporal_coverage and "1990-01" must not appear.
     assert "1990-01-01" not in blob
+    assert "1990-01" not in blob
     # 4. rare category (<k) suppressed
     assert "UNIQUE_X" not in blob
     # 5. temporal coverage present but only month-granular
@@ -47,3 +49,6 @@ def test_no_raw_values_and_kanon_hold(tmp_path):
     ts = d["files"][os.path.join("oura_ring", "TIME_oura_heartrate.csv")]["columns"]["timestamp"]
     assert ts["temporal_coverage"]["min_month"] == "2025-01"
     assert "2025-01-01" not in json.dumps(ts)   # no day/second granularity anywhere on the column
+    # 6. the DOB column gets NO temporal_coverage facet at all (birth month must never surface)
+    dob = d["files"][os.path.join("redcap_demographics", "TIME_redcap_demographics.csv")]["columns"]["date_of_birth"]
+    assert "temporal_coverage" not in dob
