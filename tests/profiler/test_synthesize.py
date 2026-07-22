@@ -130,9 +130,9 @@ def test_retained_minority_format_emitted_and_subk_never(tmp_path):
 
 
 def test_ksuppressed_column_renders_format_correct_no_date_only_regression(tmp_path):
-    # A < k-subject timestamp column has BOTH its distribution AND its format descriptor
-    # suppressed (R11/R15). Synthesis must still render a parseable, non-disclosive DEFAULT
-    # ISO format — never the old date-only random path.
+    # A < k-subject timestamp column has its (person-level) DISTRIBUTION suppressed, but its
+    # DOMINANT format descriptor is a device-level attribute and IS disclosed. Synthesis
+    # renders that real format (…Z here), never the old date-only random path.
     rows = [{"subject_id": f"S{s:03d}",
              "timestamp": (pd.Timestamp("2025-01-01") + pd.Timedelta(days=d, hours=8 + h)
                            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -141,11 +141,11 @@ def test_ksuppressed_column_renders_format_correct_no_date_only_regression(tmp_p
     p = tmp_path / "few.csv"
     pd.DataFrame(rows).to_csv(p, index=False)
     prof = profile_file(str(p))
-    assert "temporal_distribution" not in prof["columns"]["timestamp"]  # suppressed (R11)
-    assert "format" not in prof["columns"]["timestamp"]                 # suppressed (R15, < k)
+    assert "temporal_distribution" not in prof["columns"]["timestamp"]  # person-level, suppressed
+    assert "format" in prof["columns"]["timestamp"]                     # device-level, disclosed
     df = synthesize(prof, n_rows=60, seed=0, join_keys=("subject_id",), id_pool=POOL)
     ts = df["timestamp"].astype(str)
-    assert ts.str.match(r"^\d{4}-\d{2}-\d{2}T").all()   # default ISO datetime, not date-only
+    assert ts.str.match(r"^\d{4}-\d{2}-\d{2}T.*Z$").all()   # real captured format, not date-only
 
 
 # ---------- Greptile P1: joint path honors the n_rows contract ----------
