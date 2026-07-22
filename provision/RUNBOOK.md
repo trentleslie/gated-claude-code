@@ -140,3 +140,51 @@ Installed in /usr/local/bin on the VM (also in provision/bin/):
 - `claude-arivale-launch` -> shared helper (becomes cs-gated, cd ~/analysis, exec claude $flags)
 skip-permissions is safe here: guardrails are OS-level (cs-gated can't read raw data) + the gate/audit, not
 Claude's approval prompts. Requires the operator to have (passwordless) sudo to cs-gated (root does).
+
+## Multi-dataset: claude-time (TIME_SNAPSHOTS wearable cohort) — DONE 2026-07-20
+
+`provision.sh` is now parameterized (`DATA_DIR` + `LABEL`; defaults reproduce the Arivale setup exactly).
+Stand up a second gated instance for a pre-staged dataset without touching the Arivale one:
+
+```bash
+# copy repo to box, then:
+DATA_DIR=/procedure/data/local_data/TIME_SNAPSHOTS LABEL=time \
+  bash /opt/gated-cs-src/provision/provision.sh
+```
+
+What differs from the Arivale flow, and what it does:
+- **DATA_DIR is baked into the trusted wrappers at install** (`sed __GATED_CS_DATA_DIR__`), staying
+  hardcoded-at-runtime (never env/arg). No separate `/data/<x>` mount needed when data is pre-staged.
+- **Step 4 locks pre-staged data in place** (`root:cs-exec 750/640`, cs-gated denied) instead of creating
+  an empty dir — so the real `/procedure/.../TIME_SNAPSHOTS` is locked directly.
+- **LABEL drives** the analyst workspace (`workspace-CLAUDE.time.md` — wearable cohort, join key
+  `time_traveler_id`, plain-CSV read pattern, small-cohort suppression note) and the `claude-time*`
+  launchers.
+
+Validated live on the TIME box (2026-07-20, box was WARP IP `.37`):
+- Dictionary built as cs-exec → `/var/gate/dict` (43 files, 0 warnings, cohort_n via `time_traveler_id`).
+- Isolation matrix (as cs-gated): raw data / audit / queue / gate-wrapper → **DENIED**; dictionary +
+  synthetic_samples → **readable**; sudo bridge to `run-analysis` present.
+- End-to-end gate: safe aggregate `submit-analysis` → **released** (`Withings: 4693 rows, 38 participants`);
+  adversarial 100-row dump → **quarantined** (0 released, 1 queued).
+- Claude Code 2.1.215 installed for cs-gated (`~/.local/bin/claude`). **Remaining: interactive login**
+  (`claude-time`, then authenticate) — the one step that can't be scripted.
+- NOTE: WARP IPs drift on reboot; the gate/data/dict are all box-local paths (IP-independent). Re-point the
+  `claude-science-vm` SSH alias per session; nothing inside the box references the IP.
+
+### JupyterLab handoff wiring (added 2026-07-20)
+
+`provision.sh` step 10 installs the analyst→JupyterLab bridge (opt-in via `MIRROR_DIR`):
+- **`to-notebook`** + **`/jupyter` slash command** (`~cs-gated/.claude/commands/jupyter.md`): converts an
+  analysis `.py` → `.ipynb` in place (cells split on `# %%`), stdlib-only so it runs as cs-gated.
+- **One-way mirror** (`gated-mirror` + `gated-mirror-<label>.service`): `rsync -rltD --delete --no-owner
+  --no-group --chmod=D700,F600` from `~cs-gated/analysis` → `$MIRROR_DIR` on every inotify event. The
+  destination is **root:root 700** (JupyterLab runs as root and reads it; cs-gated is denied even a dropped
+  raw extract), and the mirror is a read-only reflection (workspace is the source of truth; edits on the
+  JupyterLab side are overwritten). This is the load-bearing direction: OUT to JupyterLab, never back.
+
+Invocation for TIME: `... MIRROR_DIR=/procedure/claude-time-workspace ... provision.sh`. Verified live on the
+TIME box (2026-07-20): outward sync ~2s; cs-gated denied the mirror dir; a root-injected file never reached
+the workspace and was --deleted on next sync; JupyterLab (root) reads the mirror. The operator opens notebooks
+at JupyterLab `base_url=procedures/<vm-id>/processing` and runs the gate-suppressed tables against real data
+there (the gate isolates the model, not the authorized human).

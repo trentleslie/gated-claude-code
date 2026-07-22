@@ -13,7 +13,7 @@ SCRIPT="$1"; LAYER="$2"                        # $2 = --layer value (untrusted; 
 case "$LAYER" in
   ''|-*|*[!A-Za-z0-9_-]*) echo "invalid layer name" >&2; exit 2;;
 esac
-DATA_DIR=/data/arivale                         # hardcoded, never from env/args
+DATA_DIR=__GATED_CS_DATA_DIR__                 # baked in at install by provision.sh; never from env/args
 DERIVED_DIR=/var/gate/derived                  # hardcoded, never from env/args
 OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
 LAYER_DIR="$(mktemp -d /var/gate/layerstage.XXXXXX)"

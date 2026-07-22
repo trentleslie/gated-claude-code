@@ -13,3 +13,8 @@ def test_add_layer_merges_and_tags_derived(tmp_path):
     assert (out/"synthetic_samples"/"metabolomics_imputed.csv").exists()
     syn = pd.read_csv(out/"synthetic_samples"/"metabolomics_imputed.csv")
     assert syn["public_client_id"].str.startswith("SYNTH_").all()   # shared pool -> joinable
+    # regression: _render_md iterates d["sources"]; the derived layer must be
+    # registered there too, or it silently vanishes from the regenerated md.
+    md = (out/"dictionary.md").read_text()
+    assert "metabolomics_imputed" in md
+    assert "imp" in md   # a non-sensitive column of the layer

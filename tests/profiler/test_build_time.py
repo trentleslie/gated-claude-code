@@ -1,0 +1,88 @@
+import os, json
+import pandas as pd
+from gated_cs.config import DEFAULTS
+from gated_cs.profiler.build_dictionary import build
+
+def _mk(tmp_path):
+    base = tmp_path / "TIME"
+    (base / "oura_ring").mkdir(parents=True)
+    (base / "stelo_cgm" / "processed").mkdir(parents=True)
+    (base / "stelo_cgm" / "processed" / ".ipynb_checkpoints").mkdir(parents=True)
+    (base / "redcap_questionnaires" / "raw").mkdir(parents=True)
+    # wearable file
+    rows = [{"subject_id": f"S{s:02d}",
+             "timestamp": pd.Timestamp("2025-01-01") + pd.Timedelta(minutes=5 * i),
+             "hr": 60 + (i % 30)} for s in range(10) for i in range(30)]
+    pd.DataFrame(rows).to_csv(base / "oura_ring" / "TIME_oura_heartrate.csv", index=False)
+    # checkpoint dupe that must be ignored
+    pd.DataFrame(rows).to_csv(
+        base / "stelo_cgm" / "processed" / ".ipynb_checkpoints" / "x-checkpoint.csv", index=False)
+    # cgm
+    pd.DataFrame(rows).to_csv(base / "stelo_cgm" / "processed" / "TIME_cgm_all_subjects.csv", index=False)
+    # codebook
+    pd.DataFrame({"field_name": ["q1", "q2"],
+                  "question_text": ["How rested?", "How stressed?"]}
+                 ).to_csv(base / "redcap_questionnaires" / "raw" / "TIME_redcap_questions.csv", index=False)
+    return str(base)
+
+def test_build_groups_by_source_skips_checkpoints_and_writes_manifest(tmp_path):
+    data_dir = _mk(tmp_path)
+    out = str(tmp_path / "out")
+    d = build(data_dir, out_dir=out, thresholds=DEFAULTS)
+    # 3 real files, no checkpoint
+    assert set(d["sources"].keys()) == {"oura_ring", "stelo_cgm", "redcap_questionnaires"}
+    assert len(d["files"]) == 3
+    assert not any(".ipynb_checkpoints" in r for r in d["files"])
+    # subject key + cohort surfaced
+    hr = d["files"][os.path.join("oura_ring", "TIME_oura_heartrate.csv")]
+    assert hr["subject_key"] == "subject_id" and hr["cohort_n"] == 10
+    assert "temporal_coverage" in hr["columns"]["timestamp"]
+    # codebook role + descriptive text surfaced in md
+    md = open(os.path.join(out, "dictionary.md")).read()
+    assert "How rested?" in md
+    # artifacts written
+    assert os.path.exists(os.path.join(out, "dictionary.json"))
+    assert os.path.exists(os.path.join(out, "run_manifest.json"))
+    assert os.path.exists(os.path.join(out, "synthetic_samples",
+                                       "oura_ring", "TIME_oura_heartrate.csv"))
+    manifest = json.load(open(os.path.join(out, "run_manifest.json")))
+    assert manifest["files"][os.path.join("oura_ring", "TIME_oura_heartrate.csv")]["row_count"] == 300
+    assert "sha256" in manifest["files"][os.path.join("oura_ring", "TIME_oura_heartrate.csv")]
+
+def test_codebook_bypass_gated_on_no_subject_key(tmp_path):
+    # A raw per-subject file NAMED like a codebook (has a codebook token in its
+    # filename) but whose COLUMNS carry a subject key + PII must NOT hit the
+    # raw-text bypass — it should be downgraded to role="data" and suppressed.
+    data_dir = _mk(tmp_path)
+    raw = tmp_path / "TIME" / "redcap_questionnaires" / "raw"
+    pd.DataFrame({
+        "subject_id": [f"S{i:02d}" for i in range(8)],
+        "email": [f"user{i}@example.com" for i in range(8)],
+        "free_text_answer": [f"my private note number {i} is unique" for i in range(8)],
+    }).to_csv(raw / "TIME_subject_answers_to_questions.csv", index=False)
+    out = str(tmp_path / "out_neg")
+    d = build(data_dir, out_dir=out, thresholds=DEFAULTS)
+
+    trap = os.path.join("redcap_questionnaires", "raw", "TIME_subject_answers_to_questions.csv")
+    # (a) downgraded to data, not codebook, and no raw-text dump attached
+    assert d["files"][trap]["role"] == "data"
+    assert "codebook_text" not in d["files"][trap]
+    # (b) no subject-linked value reaches either artifact
+    json_txt = open(os.path.join(out, "dictionary.json")).read()
+    md_txt = open(os.path.join(out, "dictionary.md")).read()
+    for artifact in (json_txt, md_txt):
+        assert "user0@example.com" not in artifact
+        assert "my private note number 0 is unique" not in artifact
+        assert "S00" not in artifact
+    # (c) a genuine codebook (questions file, NO subject key) still surfaces text
+    genuine = os.path.join("redcap_questionnaires", "raw", "TIME_redcap_questions.csv")
+    assert d["files"][genuine]["role"] == "codebook"
+    assert "How rested?" in md_txt
+
+def test_build_synthetic_samples_leak_nothing_real(tmp_path):
+    data_dir = _mk(tmp_path)
+    out = str(tmp_path / "out2")
+    build(data_dir, out_dir=out, thresholds=DEFAULTS)
+    synth = open(os.path.join(out, "synthetic_samples", "oura_ring", "TIME_oura_heartrate.csv")).read()
+    # real subject ids look like S00..S09; synthetic id_pool uses SYNTH_ prefix
+    assert "S00" not in synth and "SYNTH_" in synth

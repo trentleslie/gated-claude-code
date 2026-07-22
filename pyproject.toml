@@ -16,3 +16,8 @@ gate-api = "gated_cs.service.api:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# Make `gated_cs` importable from src/ without an editable install, so tests
+# run in a fresh worktree venv (uv skips packaging without a build-system).
+pythonpath = ["src"]
