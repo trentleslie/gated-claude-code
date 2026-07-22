@@ -114,12 +114,15 @@ cat > "/usr/local/bin/claude-${LABEL}-launch" <<'LAUNCH'
 #!/usr/bin/env bash
 # Launch the gated analyst as the cs-gated user. `--t <minutes>` sets the gate's analysis compute
 # timeout (operator-only: written to a root-owned config the gate reads, clamped to 1-60 min); absent
-# --t it resets to the 120s default. All other args are passed through to claude.
+# --t it resets to the 120s default. Other args pass through to claude with boundaries preserved.
+# CONCURRENCY: the timeout is a single root-owned global read by the gate at submit time, not bound to
+# a session; on a shared box the last launch wins. These boxes are single-operator in practice.
 CONF=/etc/gated-cs/gate_timeout_seconds
 mins=""; rest=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    --t) mins="${2:-}"; shift 2 ;;
+    --t) [ $# -ge 2 ] || { echo "claude: --t needs a value in minutes (e.g. --t 20)" >&2; exit 2; }
+         mins="$2"; shift 2 ;;
     --t=*) mins="${1#--t=}"; shift ;;
     *) rest+=("$1"); shift ;;
   esac
@@ -137,8 +140,9 @@ if mkdir -p "$(dirname "$CONF")" 2>/dev/null && printf '%s\n' "$secs" > "$CONF" 
 else
   echo "warning: could not write $CONF (run as root to use --t); gate keeps its current timeout" >&2
 fi
-exec sudo -iu cs-gated env CLAUDE_FLAGS="${rest[*]}" bash -lc \
-  'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; cd ~/analysis && exec claude $CLAUDE_FLAGS'
+# positional passthrough preserves argument boundaries across the sudo/bash -lc boundary
+exec sudo -iu cs-gated env bash -lc \
+  'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; cd ~/analysis && exec claude "$@"' claude "${rest[@]}"
 LAUNCH
 cat > "/usr/local/bin/claude-${LABEL}" <<LAUNCH
 #!/usr/bin/env bash
@@ -147,14 +151,16 @@ LAUNCH
 cat > "/usr/local/bin/claude-${LABEL}-remote" <<REMOTE
 #!/usr/bin/env bash
 # Persistent, reattachable gated analyst (tmux). Ctrl-b d to detach; re-run to reattach.
-# \`--t <minutes>\` (forwarded to the launcher) applies when the session is first CREATED; a bare
-# reattach keeps the previously-set timeout.
+# \`--t <minutes>\` (forwarded to the launcher, shell-quoted) applies when the session is first CREATED;
+# a bare reattach keeps the previously-set timeout.
 S=${LABEL}
 if tmux has-session -t "\$S" 2>/dev/null; then
   echo "reattaching existing session '\$S' (Ctrl-b then d to detach)"
 else
   echo "starting new session '\$S' (Ctrl-b then d to detach and leave it running)"
-  tmux new-session -d -s "\$S" "claude-${LABEL}-launch --dangerously-skip-permissions \$*"
+  cmd="claude-${LABEL}-launch --dangerously-skip-permissions"
+  for a in "\$@"; do cmd="\$cmd \$(printf '%q' "\$a")"; done
+  tmux new-session -d -s "\$S" "\$cmd"
 fi
 exec tmux attach -t "\$S"
 REMOTE
