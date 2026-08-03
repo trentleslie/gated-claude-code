@@ -58,12 +58,22 @@ def _per_person_verdict(df, thresholds, has_count=False, count_col=None):
                 continue
             nun = int(col.nunique(dropna=True))
             nrows = int(col.dropna().shape[0])
-            if (not has_count and nun >= 2 and nrows
-                    and nun / nrows > thresholds.near_unique_ratio):
+            near_unique = bool(nrows) and nun >= 2 and nun / nrows > thresholds.near_unique_ratio
+            if not has_count and near_unique:
                 # count-less + (near-)unique-per-row column of ANY dtype -> per-person
                 # micro-table. is_sensitive only inspects strings (near-unique / date /
                 # name); a numeric per-person id or measurement slips past it, so catch it
                 # here where the count-less context makes uniqueness unambiguously identifying.
+                sensitive.append(name)
+            elif has_count and near_unique and nun >= thresholds.k:
+                # count-bearing: is_sensitive already flags near-unique STRINGS at/above the
+                # k-distinct floor; extend the SAME floor to numeric columns so a numeric
+                # per-person key (e.g. an unlabeled subject number) cannot slip past while the
+                # count column licenses it (Greptile P1: numeric id in a count-bearing table).
+                # Below the floor a near-unique column is treated as a small grouping label,
+                # exactly as a small frequency table's labels are, so genuine aggregates (a
+                # groupby()-size output, where each group appears once) still release -- that
+                # sub-k case is mechanically indistinguishable from per-person data.
                 sensitive.append(name)
             elif not pd.api.types.is_numeric_dtype(col) and 1 < nun <= thresholds.cardinality_cap:
                 # a low-cardinality categorical (age band, region, sex, ...) is not

@@ -150,10 +150,20 @@ def test_numeric_near_unique_column_without_count_is_quarantined():
     assert "per-person" in v.reason.lower()
 
 def test_numeric_near_unique_column_with_count_still_releases():
-    # boundary guard: in a count-bearing aggregate a distinct numeric statistic per group
-    # (e.g. a per-group mean) is near-unique yet legitimate -> still releases. Near
-    # uniqueness cannot distinguish it from a per-person id here, so naming is the tool
-    # (mirrors how count-bearing string near-uniqueness is handled).
+    # boundary guard: a small count-bearing aggregate (a groupby()-size output, each group
+    # appearing once) is below the k-distinct floor, so its near-unique numeric statistic
+    # per group and its near-unique labels still release -- that sub-k shape is mechanically
+    # indistinguishable from per-person data, and quarantining it would reject every small
+    # frequency table.
     df = pd.DataFrame({"region": ["W", "E", "N"], "mean_val": [1.1, 2.2, 3.3],
                        "count": [40, 55, 30]})
     assert check_table(df).status == "allow"
+
+def test_count_column_does_not_bypass_numeric_per_person_check():
+    # Greptile re-review: a near-unique NUMERIC per-person key at/above the k-distinct floor
+    # alongside a recognized count column (all cells >= k) must quarantine, mirroring how a
+    # near-unique STRING key already does -- the count column must not license a numeric id.
+    df = pd.DataFrame({"subject": [1001, 1002, 1003, 1004, 1005, 1006], "total": [10] * 6})
+    v = check_table(df)
+    assert v.status == "block"
+    assert "per-person" in v.reason.lower()
