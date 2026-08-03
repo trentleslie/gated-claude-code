@@ -211,9 +211,22 @@ def make_server(
 
     Explicit args override env/defaults, so tests can point a server at tmp dirs
     without mutating process env. If ``token`` is given it is used directly;
-    otherwise the token is read (and stripped) from ``token_file``. ``session`` is
-    the differencing-monitor boundary stamped on this server's audit records; it
-    defaults to a fresh per-process id so unrelated server runs never share one.
+    otherwise the token is read (and stripped) from ``token_file``.
+
+    ``session`` is the differencing-monitor boundary stamped on this server's audit
+    records; it defaults to a fresh per-process id. Per-process is deliberate and is
+    the SECURE granularity for an untrusted, network-submitted caller: the single
+    shared token is one principal, so grouping all of its submissions guarantees no
+    API probing campaign is missed. The two finer alternatives are both worse. A
+    caller-supplied session (e.g. a header) is forgeable -- a probing agent would vary
+    it per submission to split its own campaign and evade the monitor, the same reason
+    the gate never trusts the analyst's ambient environment. A per-request boundary
+    would put every submission in its own session, so allow<->suppress oscillation
+    (which needs several flips across requests) could never be detected on this path.
+    The only residual is therefore a false ALARM if a caller's genuinely independent
+    submissions happen to reuse a filename and alternate verdicts -- over-alerting, not
+    a missed campaign or a disclosure, which is the safe direction for a detective
+    control. A human triages the report.
     """
     cfg = _default_config()
     cfg["session"] = session if session is not None else f"api-{uuid.uuid4().hex}"
