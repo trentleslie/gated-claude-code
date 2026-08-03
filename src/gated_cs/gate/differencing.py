@@ -64,16 +64,28 @@ def _flag_windows(artifact_entries, cfg):
     return merged
 
 
+def _boundary(e):
+    """The activity boundary an oscillation must stay within to count as one campaign. A
+    threshold binary-search is one analyst iterating within a single session; independent
+    submissions that merely reuse an output filename belong to different sessions/runs and
+    must not be fused (Greptile P1 #3). Prefer an explicit `session`, fall back to `run`;
+    when the audit carries neither, all entries share the `None` boundary (legacy behaviour:
+    grouped by artifact name alone)."""
+    s = e.get("session")
+    return s if s is not None else e.get("run")
+
+
 def _oscillation_flags(artifact_entries, cfg):
-    """Per artifact NAME, count allow<->suppressed flips across successive submissions. A
-    binary-search on a suppression threshold shows up as repeated boundary crossings on the
-    same output name. Only the artifact name (already stored in cleartext in the audit log,
-    never PHI) and the flip count are emitted."""
+    """Within one session/run boundary, per artifact NAME, count allow<->suppressed flips
+    across successive submissions. A binary-search on a suppression threshold shows up as
+    repeated boundary crossings on the same output name inside one session. Only the artifact
+    name (already stored in cleartext in the audit log, never PHI) and the flip count are
+    emitted — never the session/run token."""
     seqs = {}
     for e in artifact_entries:
-        seqs.setdefault(e.get("artifact"), []).append(e.get("verdict"))
+        seqs.setdefault((_boundary(e), e.get("artifact")), []).append(e.get("verdict"))
     flags = []
-    for artifact, verdicts in seqs.items():
+    for (_bound, artifact), verdicts in seqs.items():
         states = ["released" if v == "allow" else "suppressed" for v in verdicts]
         flips = sum(1 for a, b in zip(states, states[1:]) if a != b)
         if flips >= cfg.min_oscillations:

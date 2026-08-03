@@ -54,6 +54,32 @@ def test_suppress_allow_oscillation_is_flagged():
                for f in report["oscillation_flags"])
 
 
+def test_unrelated_runs_reusing_artifact_name_do_not_oscillate():
+    # Greptile P1 #3: five independent submissions that happen to reuse the filename r.csv,
+    # each with its own session / run / script_hash, must NOT be fused into one probing
+    # campaign. Their allow/suppress transitions are unrelated activity, not a binary-search
+    # on a suppression boundary, so no oscillation may be flagged.
+    seq = ["allow", "suppress", "allow", "suppress", "allow"]
+    entries = [{"script_hash": f"s{i}", "session": f"sess{i}", "run": f"run{i}",
+                "artifact": "r.csv", "verdict": v, "reason": "x"}
+               for i, v in enumerate(seq)]
+    report = analyze(entries)
+    assert report["oscillation_flags"] == []
+    assert report["differencing_pass"] is True
+
+
+def test_oscillation_within_one_session_is_still_flagged():
+    # the fix must not blunt detection: a genuine threshold search flips the same artifact
+    # allow<->suppress across successive submissions WITHIN one session -> still flagged.
+    seq = ["suppress", "allow", "suppress", "allow", "suppress", "allow"]
+    entries = [{"script_hash": f"s{i}", "session": "S", "artifact": "probe.csv",
+                "verdict": v, "reason": "x"} for i, v in enumerate(seq)]
+    report = analyze(entries)
+    assert report["differencing_pass"] is False
+    assert any(f["artifact"] == "probe.csv" and f["flips"] >= MonitorConfig().min_oscillations
+               for f in report["oscillation_flags"])
+
+
 def test_report_is_aggregate_only_no_leakage():
     # reason strings can name columns / values; the report must never echo them, or a subject
     # id, or a script body — only counts, rates, positions, hashes, and artifact names.

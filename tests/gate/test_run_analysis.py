@@ -12,6 +12,22 @@ def test_clean_aggregate_released(tmp_path):
             str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))
     assert r["status"] == "released" and r["outputs"]
 
+def test_session_env_is_stamped_on_audit_records(tmp_path, monkeypatch):
+    # GATED_CS_SESSION scopes the offline differencing monitor: when the launcher sets it,
+    # each artifact-decision record carries the session so unrelated runs reusing a filename
+    # are not fused into one probing campaign (Greptile P1 #3). Absent the env, no session
+    # key is added (covered by the other run() tests).
+    import json
+    monkeypatch.setenv("GATED_CS_SESSION", "sess-abc")
+    body = ("import pandas as pd, os\n"
+            "pd.DataFrame({'group':['a','b'],'count':[50,60]})"
+            ".to_csv(os.path.join(os.environ['OUTPUT_DIR'],'r.csv'), index=False)\n")
+    run(_script(tmp_path, body), str(tmp_path/'data'), str(tmp_path/'out'),
+        str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))
+    entries = [json.loads(l) for l in (tmp_path/'audit.jsonl').read_text().splitlines() if l.strip()]
+    art = [e for e in entries if e.get("artifact") == "r.csv"]
+    assert art and all(e.get("session") == "sess-abc" for e in art)
+
 def test_row_dump_queued(tmp_path):
     body = ("import pandas as pd, os\n"
             "pd.DataFrame({'x':range(100)})"

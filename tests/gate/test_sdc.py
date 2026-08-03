@@ -97,3 +97,40 @@ def test_empty_column_without_count_fails_closed():
     df = pd.DataFrame({"x": [np.nan, np.nan, np.nan]})
     v = check_table(df)   # must not crash
     assert v.status == "block"   # uninterpretable -> fail closed to human review
+
+# --- Greptile P1 #1: a count column must not exempt a table from the per-person check ---
+
+def test_count_column_does_not_bypass_per_person_check():
+    # A near-unique per-person identifier column (participant_code, one distinct value per
+    # row, >= k distinct) alongside a recognized count column (total) whose cells are all
+    # >= k previously auto-released via the count branch WITHOUT any value-based sensitivity
+    # check. The participant values still require human review -> quarantine.
+    df = pd.DataFrame({"participant_code": [f"P{i:04d}" for i in range(8)],
+                       "total": [10] * 8})
+    v = check_table(df)
+    assert v.status == "block"
+    assert "per-person" in v.reason.lower()
+
+def test_count_column_with_low_cardinality_group_still_allows():
+    # regression guard for #1's fix: a genuine frequency table (low-cardinality group +
+    # count, all cells >= k) must still auto-release -- the per-person check must not
+    # over-quarantine legitimate aggregates.
+    df = pd.DataFrame({"region": ["West", "East", "North"], "total": [40, 55, 30]})
+    assert check_table(df).status == "allow"
+
+# --- Greptile P1 #2: sub-k unique columns in a count-less table must quarantine ---
+
+def test_sub_k_unique_column_without_count_is_quarantined():
+    # A count-less table with fewer than k rows and one distinct non-date string per row is
+    # a per-person micro-cohort. Being below the k-distinct floor makes it MORE identifying
+    # (group size 1 < k), not less, so it must quarantine rather than auto-release.
+    df = pd.DataFrame({"participant_code": ["P1", "P2", "P3", "P4"]})  # 4 rows, k=5
+    v = check_table(df)
+    assert v.status == "block"
+    assert "per-person" in v.reason.lower()
+
+def test_single_row_metric_aggregate_without_count_still_allows():
+    # boundary guard for #2's fix: a 1-row metric/value summary is count-less and trivially
+    # "unique per row" (nunique == 1) yet discloses no individual -> still auto-release.
+    df = pd.DataFrame({"metric": ["mean_glucose"], "value": [5.4]})
+    assert check_table(df).status == "allow"

@@ -106,6 +106,12 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
     if layer_dir:
         os.makedirs(layer_dir, exist_ok=True)
     audit = AuditLog(audit_path)
+    # Session boundary for the offline differencing monitor: it scopes allow<->suppress
+    # oscillation detection per analyst session so that unrelated runs which merely reuse an
+    # output filename are not fused into one probing campaign (see differencing._boundary).
+    # The interactive launcher sets GATED_CS_SESSION per session; absent it, records are
+    # unchanged and the monitor falls back to grouping by artifact name alone.
+    session = os.environ.get("GATED_CS_SESSION")
     # env for launching bwrap itself / the no-sandbox fallback; the sandboxed child's env
     # is set entirely by --clearenv + --setenv in _child_command
     env = {"OUTPUT_DIR": out_dir, "DATA_DIR": data_dir,
@@ -157,6 +163,8 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
             queued.append(dest)
             verdict, reason = "unclassifiable", "non-csv artifact quarantined"
         record = {"script_hash": sh, "artifact": rel, "verdict": verdict, "reason": reason}
+        if session is not None:
+            record["session"] = session
         if verdict in ("block", "unclassifiable"):
             record["quarantined_to"] = dest
         elif verdict in ("allow", "suppress") and results_dir:
