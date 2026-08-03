@@ -3,3 +3,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 dictionary_out/
+
+# memtrace daemon state (local only)
+.memdb/
