@@ -30,6 +30,19 @@ if mkdir -p "$(dirname "$CONF")" 2>/dev/null && printf '%s\n' "$secs" > "$CONF" 
 else
   echo "warning: could not write $CONF (run as root to use --t); gate keeps its current timeout" >&2
 fi
+# Establish a fresh per-analyst-session id for this launch. The gate's offline differencing
+# monitor scopes allow<->suppress oscillation detection by this boundary so that unrelated
+# runs which merely reuse an output filename (e.g. r.csv) are not fused into one probing
+# campaign. It is written to a root-owned file the analyst (cs-gated) cannot forge, and the
+# run-analysis wrapper reads it per submission. Same single-operator concurrency caveat as
+# the timeout above: the last launch on a shared box wins.
+SCONF=/etc/gated-cs/session_id
+sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$-${RANDOM}")"
+if mkdir -p "$(dirname "$SCONF")" 2>/dev/null && printf '%s\n' "$sid" > "$SCONF" 2>/dev/null; then
+  chmod 0644 "$SCONF" 2>/dev/null || true
+else
+  echo "warning: could not write $SCONF (run as root); differencing monitor will group by artifact name only" >&2
+fi
 # positional passthrough preserves argument boundaries across the sudo/bash -lc boundary
 exec sudo -iu cs-gated env bash -lc \
   'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; cd ~/analysis && exec claude "$@"' claude-arivale "${rest[@]}"

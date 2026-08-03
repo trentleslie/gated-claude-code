@@ -99,19 +99,19 @@ MAX_GATE_TIMEOUT = 3600  # hard ceiling (1h) on the operator-configurable analys
 
 def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
         derived_dir=None, layer_dir=None, layer_name=None, thresholds=DEFAULTS,
-        dict_path=None, gate_timeout=120):
+        dict_path=None, gate_timeout=120, session=None):
     os.makedirs(out_dir, exist_ok=True); os.makedirs(queue_dir, exist_ok=True)
     if results_dir is not None:
         os.makedirs(results_dir, exist_ok=True)
     if layer_dir:
         os.makedirs(layer_dir, exist_ok=True)
     audit = AuditLog(audit_path)
-    # Session boundary for the offline differencing monitor: it scopes allow<->suppress
-    # oscillation detection per analyst session so that unrelated runs which merely reuse an
+    # `session` is the activity boundary the offline differencing monitor scopes
+    # allow<->suppress oscillation detection by, so unrelated runs that merely reuse an
     # output filename are not fused into one probing campaign (see differencing._boundary).
-    # The interactive launcher sets GATED_CS_SESSION per session; absent it, records are
-    # unchanged and the monitor falls back to grouping by artifact name alone.
-    session = os.environ.get("GATED_CS_SESSION")
+    # It MUST come from a trusted caller (the root-written session id the run-analysis
+    # wrapper passes, or the API server's per-process id) -- never from the untrusted
+    # analyst's ambient environment, which the wrapper scrubs with `env -i` anyway.
     # env for launching bwrap itself / the no-sandbox fallback; the sandboxed child's env
     # is set entirely by --clearenv + --setenv in _child_command
     env = {"OUTPUT_DIR": out_dir, "DATA_DIR": data_dir,
@@ -163,7 +163,7 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
             queued.append(dest)
             verdict, reason = "unclassifiable", "non-csv artifact quarantined"
         record = {"script_hash": sh, "artifact": rel, "verdict": verdict, "reason": reason}
-        if session is not None:
+        if session:
             record["session"] = session
         if verdict in ("block", "unclassifiable"):
             record["quarantined_to"] = dest
@@ -213,10 +213,13 @@ def main():
     ap.add_argument("--dict", default="/var/gate/dict/dictionary.json")
     ap.add_argument("--timeout", type=int, default=120,
                     help="analysis wall-clock timeout in seconds (operator-set; hard-capped at 3600)")
+    ap.add_argument("--session", default=None,
+                    help="trusted per-analyst-session id (root-written; scopes the differencing "
+                         "monitor). Passed by the run-analysis wrapper, never by the analyst.")
     a = ap.parse_args()
     r = run(a.script, a.data_dir, a.out_dir, a.audit, a.queue, results_dir=a.results,
             derived_dir=a.derived_dir, layer_dir=a.layer_dir, layer_name=a.layer_name,
-            dict_path=a.dict, gate_timeout=a.timeout)
+            dict_path=a.dict, gate_timeout=a.timeout, session=a.session)
     print(r["message"]); sys.exit(0 if r["status"] != "error" else 1)
 
 if __name__ == "__main__":

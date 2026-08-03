@@ -1,0 +1,13 @@
+{
+  "pid": 3774805,
+  "loopbackEndpoint": "http://127.0.0.1:50051",
+  "uiPort": 3030,
+  "memdbDataDir": "/home/trentleslie/projects/gated-claude-science/.memdb",
+  "dataDir": "/home/trentleslie/projects/gated-claude-science/.memtrace",
+  "memdbDatabase": "memtrace",
+  "vectorDim": 768,
+  "status": "healthy",
+  "memdbMode": "local",
+  "startedAtEpochMs": 1785779531416,
+  "updatedAtEpochMs": 1785779663418
+}

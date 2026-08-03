@@ -12,21 +12,34 @@ def test_clean_aggregate_released(tmp_path):
             str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))
     assert r["status"] == "released" and r["outputs"]
 
-def test_session_env_is_stamped_on_audit_records(tmp_path, monkeypatch):
-    # GATED_CS_SESSION scopes the offline differencing monitor: when the launcher sets it,
-    # each artifact-decision record carries the session so unrelated runs reusing a filename
-    # are not fused into one probing campaign (Greptile P1 #3). Absent the env, no session
-    # key is added (covered by the other run() tests).
+def test_session_arg_is_stamped_on_audit_records(tmp_path):
+    # A trusted caller's session id scopes the offline differencing monitor: each
+    # artifact-decision record carries it so unrelated runs reusing a filename are not fused
+    # into one probing campaign (Greptile P1 #3). It arrives as an explicit argument from a
+    # trusted caller (the wrapper's --session / the API's per-process id), never from the
+    # untrusted analyst's ambient environment.
     import json
-    monkeypatch.setenv("GATED_CS_SESSION", "sess-abc")
     body = ("import pandas as pd, os\n"
             "pd.DataFrame({'group':['a','b'],'count':[50,60]})"
             ".to_csv(os.path.join(os.environ['OUTPUT_DIR'],'r.csv'), index=False)\n")
     run(_script(tmp_path, body), str(tmp_path/'data'), str(tmp_path/'out'),
-        str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))
+        str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'), session="sess-abc")
     entries = [json.loads(l) for l in (tmp_path/'audit.jsonl').read_text().splitlines() if l.strip()]
     art = [e for e in entries if e.get("artifact") == "r.csv"]
     assert art and all(e.get("session") == "sess-abc" for e in art)
+
+def test_no_session_arg_leaves_records_unstamped(tmp_path, monkeypatch):
+    # Absent a trusted session (and it must NOT be read from the environment), records carry
+    # no session key -- the monitor falls back to grouping by artifact name alone.
+    import json
+    monkeypatch.setenv("GATED_CS_SESSION", "forged-by-analyst")  # must be ignored
+    body = ("import pandas as pd, os\n"
+            "pd.DataFrame({'group':['a','b'],'count':[50,60]})"
+            ".to_csv(os.path.join(os.environ['OUTPUT_DIR'],'r.csv'), index=False)\n")
+    run(_script(tmp_path, body), str(tmp_path/'data'), str(tmp_path/'out'),
+        str(tmp_path/'audit.jsonl'), str(tmp_path/'queue'))          # no session arg
+    entries = [json.loads(l) for l in (tmp_path/'audit.jsonl').read_text().splitlines() if l.strip()]
+    assert all("session" not in e for e in entries)
 
 def test_row_dump_queued(tmp_path):
     body = ("import pandas as pd, os\n"

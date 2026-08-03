@@ -159,3 +159,50 @@ def test_submit_row_dump_queued_with_empty_outputs(server):
 def test_submit_requires_token(server):
     status, body = _post(server, "/submit", b"x = 1\n")
     assert status == 401
+
+
+# -- differencing-monitor session boundary (Greptile P1 #3) --------------
+
+def _mk(tmp_path, **kw):
+    return make_server(
+        bind="127.0.0.1", port=0, token="t",
+        data_dir=str(tmp_path / "data"), dict_dir=str(tmp_path / "dict"),
+        audit=str(tmp_path / "audit.jsonl"), queue=str(tmp_path / "queue"),
+        results=str(tmp_path / "results"), **kw,
+    )
+
+
+def test_make_server_assigns_distinct_session_per_process(tmp_path):
+    # each server process is one differencing boundary, so unrelated server runs (a restart,
+    # a separate deployment) never share a session that could fuse their activity.
+    s1, s2 = _mk(tmp_path), _mk(tmp_path)
+    try:
+        assert s1.gate_config["session"].startswith("api-")
+        assert s1.gate_config["session"] != s2.gate_config["session"]
+    finally:
+        s1.server_close(); s2.server_close()
+
+
+def test_make_server_honors_explicit_session(tmp_path):
+    s = _mk(tmp_path, session="api-fixed")
+    try:
+        assert s.gate_config["session"] == "api-fixed"
+    finally:
+        s.server_close()
+
+
+@requires_bwrap
+def test_submit_stamps_server_session_on_audit(server):
+    # end-to-end: a submission's audit record carries the server's per-process session, so
+    # the offline monitor can scope this caller's activity without fusing unrelated servers.
+    script = (
+        "import pandas as pd, os\n"
+        "pd.DataFrame({'group': ['a', 'b'], 'count': [80, 60]})"
+        ".to_csv(os.path.join(os.environ['OUTPUT_DIR'], 'r.csv'), index=False)\n"
+    ).encode()
+    status, _ = _post(server, "/submit", script, token=TOKEN)
+    assert status == 200
+    sess = server.gate_config["session"]
+    entries = [json.loads(l) for l in open(server.gate_config["audit"]) if l.strip()]
+    art = [e for e in entries if e.get("artifact", "").endswith("r.csv")]
+    assert art and all(e.get("session") == sess for e in art)

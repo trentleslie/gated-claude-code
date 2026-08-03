@@ -18,6 +18,20 @@ def test_run_analysis_wrapper_pins_trusted_paths():
     assert "--results /var/gate/results" in txt
     assert "run-analysis" in txt
 
+def test_wrapper_reads_trusted_session_and_passes_it():
+    # the differencing-monitor boundary must come from the root-written session file (which
+    # cs-gated cannot forge) and be passed as an explicit arg, because `env -i` scrubs the
+    # environment. Greptile P1 #3: production entry points must establish the boundary.
+    txt = (P / "run-analysis-wrapper").read_text()
+    assert "/etc/gated-cs/session_id" in txt
+    assert "--session" in txt
+
+def test_launcher_establishes_a_session_id():
+    txt = (P / "bin" / "claude-arivale-launch").read_text()
+    assert "/etc/gated-cs/session_id" in txt
+    # generated per launch (unforgeable source), not inherited from the analyst's env
+    assert "random/uuid" in txt
+
 def test_submit_copies_into_shared_incoming_then_sudo():
     txt = (P / "submit-analysis").read_text()
     assert "/var/gate/incoming" in txt

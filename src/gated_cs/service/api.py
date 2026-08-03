@@ -21,6 +21,7 @@ import hmac
 import json
 import os
 import tempfile
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlparse
 
@@ -172,6 +173,11 @@ class GateAPIHandler(BaseHTTPRequestHandler):
             cfg["audit"],
             cfg["queue"],
             results_dir=cfg["results"],
+            # One boundary for this server process: submissions to a single token-holding
+            # caller form one probing surface, while a separate server run (or restart) is
+            # a distinct session. Passed explicitly (not via process env) so it is
+            # request-safe under ThreadingHTTPServer (see differencing._boundary).
+            session=cfg.get("session"),
         )
 
         outputs = []
@@ -199,14 +205,18 @@ def make_server(
     results=None,
     token_file=None,
     token=None,
+    session=None,
 ):
     """Build a configured, bound (not-yet-serving) ThreadingHTTPServer.
 
     Explicit args override env/defaults, so tests can point a server at tmp dirs
     without mutating process env. If ``token`` is given it is used directly;
-    otherwise the token is read (and stripped) from ``token_file``.
+    otherwise the token is read (and stripped) from ``token_file``. ``session`` is
+    the differencing-monitor boundary stamped on this server's audit records; it
+    defaults to a fresh per-process id so unrelated server runs never share one.
     """
     cfg = _default_config()
+    cfg["session"] = session if session is not None else f"api-{uuid.uuid4().hex}"
     overrides = {
         "bind": bind,
         "port": port,
