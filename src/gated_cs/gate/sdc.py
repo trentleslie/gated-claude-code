@@ -30,11 +30,16 @@ def _per_person_verdict(df, thresholds, has_count=False, count_col=None):
     or None if the table looks like a genuine aggregate that may release.
 
     This runs on BOTH release paths. On a count-BEARING table a recognized count column is
-    the aggregate signal, so its own values are the counts (skipped here) and low-cardinality
-    grouping labels may legitimately be near-unique. On a count-LESS table there is no such
-    signal, so a non-numeric column that is (near-)unique per row is a per-person micro-table
-    and quarantines even below the k-distinct floor: sub-k uniqueness is the worst case
-    (group size 1 < k), not a safe one (Greptile P1 #1 / #2).
+    the aggregate signal, so its own values are the counts (skipped here), low-cardinality
+    grouping labels may legitimately be near-unique, and numeric columns are legitimately
+    per-group statistics (a distinct mean per group is near-unique yet safe) -- so near
+    uniqueness there cannot distinguish a per-person id from an aggregate and naming is the
+    tool. On a count-LESS table there is no aggregate signal, so a column that is (near-)unique
+    per row is a per-person micro-table REGARDLESS OF DTYPE -- a numeric per-person id or raw
+    measurement is as identifying as a string code (Greptile P1 numeric bypass) -- and it
+    quarantines even below the k-distinct floor: sub-k uniqueness is the worst case (group
+    size 1 < k), not a safe one (Greptile P1 #1 / #2). nunique == 1 (a constant / 1-row
+    summary) discloses no individual and still releases.
     """
     sensitive, quasi = [], []
     for c in df.columns:
@@ -50,20 +55,21 @@ def _per_person_verdict(df, thresholds, has_count=False, count_col=None):
                                         f"{name!r}, human review required")
             if is_sensitive(name, col, thresholds):
                 sensitive.append(name)
-            elif not pd.api.types.is_numeric_dtype(col):
-                nun = int(col.nunique(dropna=True))
-                nrows = int(col.dropna().shape[0])
-                if (not has_count and nun >= 2 and nrows
-                        and nun / nrows > thresholds.near_unique_ratio):
-                    # count-less + (near-)unique-per-row string -> per-person micro-table.
-                    # is_sensitive's k-distinct floor misses the sub-k case; catch it here
-                    # where the count-less context makes it unambiguously identifying.
-                    # nunique == 1 (a constant / 1-row summary) discloses no individual.
-                    sensitive.append(name)
-                elif 1 < nun <= thresholds.cardinality_cap:
-                    # a low-cardinality categorical (age band, region, sex, ...) is not
-                    # identifier-like alone, but co-occurring ones triangulate (R3).
-                    quasi.append(name)
+                continue
+            nun = int(col.nunique(dropna=True))
+            nrows = int(col.dropna().shape[0])
+            if (not has_count and nun >= 2 and nrows
+                    and nun / nrows > thresholds.near_unique_ratio):
+                # count-less + (near-)unique-per-row column of ANY dtype -> per-person
+                # micro-table. is_sensitive only inspects strings (near-unique / date /
+                # name); a numeric per-person id or measurement slips past it, so catch it
+                # here where the count-less context makes uniqueness unambiguously identifying.
+                sensitive.append(name)
+            elif not pd.api.types.is_numeric_dtype(col) and 1 < nun <= thresholds.cardinality_cap:
+                # a low-cardinality categorical (age band, region, sex, ...) is not
+                # identifier-like alone, but co-occurring ones triangulate (R3). Numeric
+                # columns are values/statistics, not grouping quasi-identifiers.
+                quasi.append(name)
         except Exception:
             # fail closed: an unclassifiable column quarantines, never releases.
             return Verdict("block", f"per-person heuristic: unclassifiable column {name!r}")

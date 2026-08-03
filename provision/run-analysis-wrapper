@@ -11,12 +11,18 @@ OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
 # cs-gated cannot write /etc/gated-cs. Validate to an integer here; the gate hard-caps it at 3600.
 GATE_TIMEOUT="$(cat /etc/gated-cs/gate_timeout_seconds 2>/dev/null || echo 120)"
 case "$GATE_TIMEOUT" in ''|*[!0-9]*) GATE_TIMEOUT=120;; esac
-# Trusted per-analyst-session id, written by root at launch (claude-<label>); cs-gated cannot
-# write /etc/gated-cs, so it cannot forge or reset this. It scopes the offline differencing
-# monitor so unrelated runs that merely reuse an output filename are not fused into one
-# probing campaign. Sanitize to a safe token; empty when unset -> the monitor falls back to
-# grouping by artifact name alone. Passed as an explicit arg because `env -i` scrubs the env.
-GATE_SESSION="$(cat /etc/gated-cs/session_id 2>/dev/null || true)"
+# Per-analyst-session boundary for the offline differencing monitor, so unrelated runs that
+# merely reuse an output filename are not fused into one probing campaign. Prefer the kernel
+# AUDIT LOGIN-SESSION id: it is set once by pam_loginuid at login (write-once, so cs-gated
+# cannot forge or reset it), inherited across sudo, and DISTINCT per concurrent analyst login
+# -- so two concurrent sessions get separate boundaries instead of overwriting one shared
+# file. Fall back to the root-written launch file only when audit sessions are unavailable
+# (sessionid unset == 4294967295). Passed as an explicit arg because `env -i` scrubs the env.
+GATE_SESSION="$(cat /proc/self/sessionid 2>/dev/null || true)"
+case "$GATE_SESSION" in
+  ''|4294967295) GATE_SESSION="$(cat /etc/gated-cs/session_id 2>/dev/null || true)" ;;
+  *)             GATE_SESSION="login-$GATE_SESSION" ;;
+esac
 GATE_SESSION="$(printf '%s' "$GATE_SESSION" | tr -cd 'A-Za-z0-9._-' | cut -c1-128)"
 exec env -i \
   PATH=/opt/gated-cs/bin:/usr/local/bin:/usr/bin:/bin \

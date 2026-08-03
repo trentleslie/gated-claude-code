@@ -43,7 +43,10 @@ def test_nan_count_is_suppressed_fail_closed():
     assert len(v.safe_df) == 1   # the NaN-count row is dropped
 
 def test_row_count_exactly_at_cap_is_not_blocked():
-    df = pd.DataFrame({"val": range(20)})   # == row_cap (20), no count/id column
+    # 20 rows == row_cap: not blocked BY THE ROW CAP. Use a low-cardinality column so the
+    # per-person check (which now also covers numeric near-unique columns) is not what fires;
+    # a bare unique-per-row numeric column is now treated as per-person (see numeric tests).
+    df = pd.DataFrame({"bucket": [i % 4 for i in range(20)]})   # 4 distinct values, not per-row-unique
     assert check_table(df).status == "allow"
 
 def test_oversized_and_identifier_both_block():
@@ -133,4 +136,24 @@ def test_single_row_metric_aggregate_without_count_still_allows():
     # boundary guard for #2's fix: a 1-row metric/value summary is count-less and trivially
     # "unique per row" (nunique == 1) yet discloses no individual -> still auto-release.
     df = pd.DataFrame({"metric": ["mean_glucose"], "value": [5.4]})
+    assert check_table(df).status == "allow"
+
+# --- Greptile P1 (re-review): numeric per-person columns must not bypass the check ---
+
+def test_numeric_near_unique_column_without_count_is_quarantined():
+    # A near-unique NUMERIC per-person column whose name does not match the identifier regex
+    # previously auto-released, because is_sensitive only inspects strings. A count-less table
+    # with a unique-per-row numeric column is a per-person micro-table -> quarantine.
+    df = pd.DataFrame({"subject": [1001, 1002, 1003, 1004, 1005, 1006]})
+    v = check_table(df)
+    assert v.status == "block"
+    assert "per-person" in v.reason.lower()
+
+def test_numeric_near_unique_column_with_count_still_releases():
+    # boundary guard: in a count-bearing aggregate a distinct numeric statistic per group
+    # (e.g. a per-group mean) is near-unique yet legitimate -> still releases. Near
+    # uniqueness cannot distinguish it from a per-person id here, so naming is the tool
+    # (mirrors how count-bearing string near-uniqueness is handled).
+    df = pd.DataFrame({"region": ["W", "E", "N"], "mean_val": [1.1, 2.2, 3.3],
+                       "count": [40, 55, 30]})
     assert check_table(df).status == "allow"

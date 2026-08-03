@@ -19,11 +19,14 @@ def test_run_analysis_wrapper_pins_trusted_paths():
     assert "run-analysis" in txt
 
 def test_wrapper_reads_trusted_session_and_passes_it():
-    # the differencing-monitor boundary must come from the root-written session file (which
-    # cs-gated cannot forge) and be passed as an explicit arg, because `env -i` scrubs the
-    # environment. Greptile P1 #3: production entry points must establish the boundary.
+    # the differencing-monitor boundary must come from a trusted, unforgeable source and be
+    # passed as an explicit arg, because `env -i` scrubs the environment. It prefers the
+    # kernel audit login-session (distinct per concurrent analyst, write-once so cs-gated
+    # cannot forge it) and falls back to the root-written launch file (Greptile P1 #3 and the
+    # concurrent-session boundary follow-up).
     txt = (P / "run-analysis-wrapper").read_text()
-    assert "/etc/gated-cs/session_id" in txt
+    assert "/proc/self/sessionid" in txt          # primary, per-login boundary
+    assert "/etc/gated-cs/session_id" in txt       # fallback when audit sessions are off
     assert "--session" in txt
 
 def test_launcher_establishes_a_session_id():
