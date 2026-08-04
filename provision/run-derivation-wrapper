@@ -17,8 +17,18 @@ DATA_DIR=__GATED_CS_DATA_DIR__                 # baked in at install by provisio
 DERIVED_DIR=/var/gate/derived                  # hardcoded, never from env/args
 OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
 LAYER_DIR="$(mktemp -d /var/gate/layerstage.XXXXXX)"
+# Same per-analyst-session boundary as run-analysis-wrapper: the derivation path also emits
+# artifact-decision audit records (its released aggregates flow through check_table), so it
+# must stamp the same session or the differencing monitor sees derivation activity unscoped.
+# Prefer the unforgeable kernel audit login-session; fall back to the root-written launch file.
+GATE_SESSION="$(cat /proc/self/sessionid 2>/dev/null || true)"
+case "$GATE_SESSION" in
+  ''|4294967295) GATE_SESSION="$(cat /etc/gated-cs/session_id 2>/dev/null || true)" ;;
+  *)             GATE_SESSION="login-$GATE_SESSION" ;;
+esac
+GATE_SESSION="$(printf '%s' "$GATE_SESSION" | tr -cd 'A-Za-z0-9._-' | cut -c1-128)"
 exec env -i PATH=/opt/gated-cs/bin:/usr/local/bin:/usr/bin:/bin GATED_CS_REQUIRE_SANDBOX=1 \
   run-analysis "$SCRIPT" --data-dir "$DATA_DIR" --out-dir "$OUT_DIR" \
     --audit /var/gate/audit.jsonl --queue /var/gate/queue --results /var/gate/results \
     --derived-dir "$DERIVED_DIR" --layer-dir "$LAYER_DIR" --layer-name "$LAYER" \
-    --dict /var/gate/dict/dictionary.json
+    --dict /var/gate/dict/dictionary.json --session "$GATE_SESSION"

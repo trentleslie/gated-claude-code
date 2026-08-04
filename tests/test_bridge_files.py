@@ -29,6 +29,14 @@ def test_wrapper_reads_trusted_session_and_passes_it():
     assert "/etc/gated-cs/session_id" in txt       # fallback when audit sessions are off
     assert "--session" in txt
 
+def test_derivation_wrapper_scopes_session_like_analysis():
+    # the derivation path also emits artifact-decision audit records, so it must stamp the
+    # same per-login session boundary as the analysis wrapper, or the differencing monitor
+    # sees derivation activity unscoped (Greptile: derivation submissions remain unscoped).
+    txt = (P / "run-derivation-wrapper").read_text()
+    assert "/proc/self/sessionid" in txt
+    assert "--session" in txt
+
 def test_launcher_establishes_a_session_id():
     txt = (P / "bin" / "claude-arivale-launch").read_text()
     assert "/etc/gated-cs/session_id" in txt
