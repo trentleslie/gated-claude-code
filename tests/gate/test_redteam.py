@@ -38,3 +38,17 @@ def test_giant_frame_without_identifier_is_queued(tmp_path):
             ".to_csv(os.path.join(os.environ['OUTPUT_DIR'], 'r.csv'), index=False)\n")
     r = _run(tmp_path, body)
     assert r["status"] == "queued"
+
+def test_small_per_person_table_without_count_is_queued(tmp_path):
+    # residual risk 1: a small table of per-person quasi-identifiers with NO count column
+    # must be quarantined for human review, not auto-released as a clean aggregate.
+    body = ("import pandas as pd, os\n"
+            "pd.DataFrame({'note':[f'free text {i}' for i in range(10)]})"
+            ".to_csv(os.path.join(os.environ['OUTPUT_DIR'],'r.csv'), index=False)\n")
+    r = _run(tmp_path, body)
+    assert r["status"] == "queued"
+    # the audit records the per-person heuristic as the reason it was quarantined
+    import json
+    entries = [json.loads(l) for l in (tmp_path/'audit.jsonl').read_text().splitlines() if l.strip()]
+    reasons = " ".join(e.get("reason", "") for e in entries)
+    assert "per-person" in reasons.lower()

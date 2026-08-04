@@ -11,6 +11,24 @@ OUT_DIR="$(mktemp -d /var/gate/out.XXXXXX)"
 # cs-gated cannot write /etc/gated-cs. Validate to an integer here; the gate hard-caps it at 3600.
 GATE_TIMEOUT="$(cat /etc/gated-cs/gate_timeout_seconds 2>/dev/null || echo 120)"
 case "$GATE_TIMEOUT" in ''|*[!0-9]*) GATE_TIMEOUT=120;; esac
+# Per-analyst-session boundary for the offline differencing monitor, so unrelated runs that
+# merely reuse an output filename are not fused into one probing campaign. Use the kernel
+# AUDIT LOGIN-SESSION id: set once by pam_loginuid at login (write-once, so cs-gated cannot
+# forge or reset it), inherited across sudo, and DISTINCT per concurrent analyst login -- so
+# concurrent sessions get separate boundaries. If audit login sessions are unavailable
+# (sessionid unset == 4294967295), fall back to NO boundary: the monitor then groups by
+# artifact name alone. That fail-safe degradation can only ever OVER-group unrelated activity
+# (a false alarm a human triages) -- it can never SPLIT one campaign across boundaries and
+# miss it, which the previous shared-file fallback could do when a concurrent launch
+# overwrote the file mid-session. True per-session isolation without a concurrent launch race
+# requires kernel audit sessions; verify_deploy_parity / the box config must ensure they are
+# enabled. Passed as an explicit arg because `env -i` scrubs the env.
+GATE_SESSION="$(cat /proc/self/sessionid 2>/dev/null || true)"
+case "$GATE_SESSION" in
+  ''|4294967295) GATE_SESSION="" ;;                    # no per-login id -> artifact-only grouping (never split)
+  *)             GATE_SESSION="login-$GATE_SESSION" ;;
+esac
+GATE_SESSION="$(printf '%s' "$GATE_SESSION" | tr -cd 'A-Za-z0-9._-' | cut -c1-128)"
 exec env -i \
   PATH=/opt/gated-cs/bin:/usr/local/bin:/usr/bin:/bin \
   GATED_CS_REQUIRE_SANDBOX=1 \
@@ -20,4 +38,5 @@ exec env -i \
     --audit /var/gate/audit.jsonl \
     --queue /var/gate/queue \
     --results /var/gate/results \
-    --timeout "$GATE_TIMEOUT"
+    --timeout "$GATE_TIMEOUT" \
+    --session "$GATE_SESSION"
