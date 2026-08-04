@@ -20,10 +20,12 @@ LAYER_DIR="$(mktemp -d /var/gate/layerstage.XXXXXX)"
 # Same per-analyst-session boundary as run-analysis-wrapper: the derivation path also emits
 # artifact-decision audit records (its released aggregates flow through check_table), so it
 # must stamp the same session or the differencing monitor sees derivation activity unscoped.
-# Prefer the unforgeable kernel audit login-session; fall back to the root-written launch file.
+# Use the unforgeable kernel audit login-session; if unavailable, fall back to NO boundary
+# (artifact-only grouping) rather than a shared file -- a fail-safe that over-groups but
+# never splits a campaign across boundaries (see run-analysis-wrapper for the rationale).
 GATE_SESSION="$(cat /proc/self/sessionid 2>/dev/null || true)"
 case "$GATE_SESSION" in
-  ''|4294967295) GATE_SESSION="$(cat /etc/gated-cs/session_id 2>/dev/null || true)" ;;
+  ''|4294967295) GATE_SESSION="" ;;
   *)             GATE_SESSION="login-$GATE_SESSION" ;;
 esac
 GATE_SESSION="$(printf '%s' "$GATE_SESSION" | tr -cd 'A-Za-z0-9._-' | cut -c1-128)"

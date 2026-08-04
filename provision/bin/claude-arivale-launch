@@ -30,19 +30,13 @@ if mkdir -p "$(dirname "$CONF")" 2>/dev/null && printf '%s\n' "$secs" > "$CONF" 
 else
   echo "warning: could not write $CONF (run as root to use --t); gate keeps its current timeout" >&2
 fi
-# Write a FALLBACK per-launch session id for the gate's offline differencing monitor, used
-# only where the kernel audit login-session is unavailable. The wrapper prefers the audit
-# login-session id (/proc/self/sessionid), which is already distinct per concurrent analyst
-# login and cannot be forged by cs-gated; this root-owned file just covers the case where
-# audit sessions are off. On a shared box the last launch overwrites this file, but that no
-# longer fuses concurrent sessions because the wrapper's primary boundary is per-login.
-SCONF=/etc/gated-cs/session_id
-sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "$(date +%s)-$$-${RANDOM}")"
-if mkdir -p "$(dirname "$SCONF")" 2>/dev/null && printf '%s\n' "$sid" > "$SCONF" 2>/dev/null; then
-  chmod 0644 "$SCONF" 2>/dev/null || true
-else
-  echo "warning: could not write $SCONF (run as root); differencing monitor falls back to per-login audit sessions" >&2
-fi
+# The differencing monitor's per-analyst-session boundary is derived by the run-analysis /
+# run-derivation wrappers from the kernel audit login-session id (/proc/self/sessionid), which
+# is already distinct per concurrent login and unforgeable by cs-gated. No launch-time session
+# file is written here: a shared host-global file could be overwritten by a concurrent launch
+# mid-session and split a campaign across boundaries. Where audit login sessions are
+# unavailable the wrappers fall back to artifact-only grouping (fail-safe: over-group, never
+# split). Keeping audit sessions enabled on the box is a deploy precondition.
 # positional passthrough preserves argument boundaries across the sudo/bash -lc boundary
 exec sudo -iu cs-gated env bash -lc \
   'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"; cd ~/analysis && exec claude "$@"' claude-arivale "${rest[@]}"
