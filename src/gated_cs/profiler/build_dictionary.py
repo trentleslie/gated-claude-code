@@ -1,7 +1,7 @@
 import argparse, hashlib, json, os, subprocess, sys
 import pandas as pd
 from .profile import profile_file, profile_column
-from .parse import parse_file
+from .parse import read_table, is_parquet
 from .synthesize import synthesize
 from .discover import discover_files
 from .subject_key import detect_subject_key
@@ -31,10 +31,7 @@ def _codebook_text(path, cap=1000):
     # Caller must gate this behind a no-subject-key check (see build()); the
     # per-column cap is defense-in-depth to bound the blast radius if a
     # misclassified file ever reaches here.
-    parsed = parse_file(path)
-    header_line = max(parsed.data_start_line - 1, 0)
-    df = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line,
-                     header=0, low_memory=False)
+    parsed, df = read_table(path)
     out = {}
     for name in parsed.header:
         vals = sorted(str(v) for v in df[name].dropna().unique())
@@ -43,6 +40,38 @@ def _codebook_text(path, cap=1000):
             vals = vals[:cap] + [f"…({extra} more)"]
         out[name] = vals
     return out
+
+def _restore_dtype(s, dtype):
+    # Synthetic values are drawn as python floats/ints/strings; cast back to the
+    # profiled dtype so a parquet sample carries the same schema as the real file
+    # (datetime64, bool, category, int). Best-effort: a column that won't cast
+    # stays as generated, it is fabricated either way.
+    try:
+        if dtype.startswith("datetime64"):
+            out = pd.to_datetime(s, errors="coerce", utc=True, format="mixed")
+            return out if "," in dtype else out.dt.tz_localize(None)
+        if dtype in ("bool", "boolean"):
+            return pd.to_numeric(s, errors="coerce").round().astype("boolean" if s.isna().any() else "bool")
+        if dtype == "category":
+            return s.astype("category")
+        if dtype.lower().startswith(("int", "uint", "float")):
+            num = pd.to_numeric(s, errors="coerce")
+            if num.isna().any() and dtype.startswith(("int", "uint")):
+                return num.round().astype(dtype.capitalize().replace("Uint", "UInt"))
+            return num.astype(dtype)
+    except (TypeError, ValueError):
+        pass
+    return s
+
+def _write_synthetic(synth, dest, prof):
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if is_parquet(dest):
+        for name, col in prof["columns"].items():
+            if name in synth.columns:
+                synth[name] = _restore_dtype(synth[name], str(col.get("dtype", "")))
+        synth.to_parquet(dest, index=False)
+    else:
+        synth.to_csv(dest, index=False)
 
 def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
     if out_dir is None:
@@ -75,9 +104,7 @@ def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
         if not is_codebook:
             synth = synthesize(prof, n_rows=100, seed=0,
                                join_keys=(jk,) if jk else (), id_pool=id_pool)
-            dest = os.path.join(out_dir, "synthetic_samples", df_.relpath)
-            os.makedirs(os.path.dirname(dest), exist_ok=True)
-            synth.to_csv(dest, index=False)
+            _write_synthetic(synth, os.path.join(out_dir, "synthetic_samples", df_.relpath), prof)
 
     dictionary = {"data_dir": data_dir, "sources": sources, "files": files}
     with open(os.path.join(out_dir, "dictionary.json"), "w") as f:
@@ -182,9 +209,7 @@ def build_synthetic_from_dictionary(dict_path, out_dir, join_keys=None,
             detected = detect_subject_key(list(prof["columns"].keys()))
             jk = (detected,) if detected else ()
         synth = synthesize(prof, n_rows=n_rows, seed=seed, join_keys=jk, id_pool=id_pool)
-        dest = os.path.join(ss, name)
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        synth.to_csv(dest, index=False)
+        _write_synthetic(synth, os.path.join(ss, name), prof)
         written += 1
     return written
 

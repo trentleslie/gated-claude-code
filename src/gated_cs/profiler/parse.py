@@ -1,4 +1,5 @@
 import csv, re
+import pandas as pd
 from dataclasses import dataclass, field
 
 @dataclass
@@ -42,3 +43,23 @@ def parse_file(path: str) -> ParsedFile:
     # keep only descriptions that name an actual column
     descs = {k: v for k, v in descs.items() if k in header}
     return ParsedFile(delim, meta, descs, header, data_start)
+
+PARQUET_EXTS = (".parquet", ".pq")
+
+def is_parquet(path: str) -> bool:
+    return path.lower().endswith(PARQUET_EXTS)
+
+def read_table(path: str):
+    """Return (ParsedFile, DataFrame) for a delimited text or parquet file.
+
+    Parquet is self-describing, so it has no delimiter, comment metadata or
+    header offset; column names are coerced to str to match the text path."""
+    if is_parquet(path):
+        df = pd.read_parquet(path)
+        df.columns = [str(c) for c in df.columns]
+        return ParsedFile(delimiter=None, header=list(df.columns)), df
+    parsed = parse_file(path)
+    header_line = max(parsed.data_start_line - 1, 0)
+    df = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line,
+                     header=0, low_memory=False)
+    return parsed, df

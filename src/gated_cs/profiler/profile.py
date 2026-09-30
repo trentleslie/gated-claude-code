@@ -1,7 +1,7 @@
 import math
 import numpy as np
 import pandas as pd
-from .parse import parse_file
+from .parse import read_table
 from .subject_key import detect_subject_key, cohort_n
 from .temporal import is_datetime_name, is_birth_name, month_bounds, cadence_label, epoch_unit
 from .format_detect import detect_format
@@ -114,10 +114,7 @@ def _attach_facets(df, parsed, cols, thresholds, sample_rows):
     return subject_key, cn
 
 def profile_file(path, thresholds=DEFAULTS, sample_rows=None):
-    parsed = parse_file(path)
-    header_line = max(parsed.data_start_line - 1, 0)
-    df = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line,
-                     header=0, low_memory=False)
+    parsed, df = read_table(path)
     cols = {}
     for name in parsed.header:
         col = profile_column(df[name], name=name, thresholds=thresholds)
