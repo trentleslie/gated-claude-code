@@ -7,7 +7,7 @@ problem_type: documentation_gap
 component: documentation
 severity: high
 applies_when:
-  - Writing docs/solutions, onboarding or wiki text that names CLI flags, invariants, disclosure guarantees or version-dependent behavior
+  - Writing docs/solutions, onboarding or wiki text that names CLI flags, invariants, disclosure guarantees, version-dependent behavior, or a command readers run to verify them
   - Answering a collaborator (Slack, email, call) about how to onboard data or what a command accepts
   - Writing a doc example that mirrors an existing regression test
   - Describing what an SDC or re-identification check proves
@@ -17,6 +17,7 @@ symptoms:
   - "Doc example asserted bin count only, omitting the n_subjects >= k the real test asserts"
   - "Doc called the offline re-id pass 'disclosure is actually safe'; it never intersects contributor sets"
   - "Doc said a pandas 3.1 test failure hits any new environment; the lock and the VMs' Python 3.10 both rule 3.1 out"
+  - "Doc's own uv.lock check (grep -A4) showed 1 of 9 resolution markers, hiding the Python >= 3.11 split"
 root_cause: inadequate_documentation
 resolution_type: documentation_update
 related_components: [tooling, testing_framework]
@@ -51,7 +52,7 @@ Write the command next to the flag (`build-synthetic --join-keys`). When a behav
 
 **4. Verbal answers get the same bar, and the same correction.** Answers to collaborators are documentation that skipped review. When a doc fix contradicts something already said, correct it with the person too; fixing only the repo leaves the wrong instruction live where it's being used.
 
-**5. Verify reviewer findings in both directions.** On PR #9 Greptile was mostly wrong on 1 of 5 findings; on PR #10 it was right on 3 of 3. Neither record justifies batch acceptance or batch dismissal. Open the cited symbol for each finding, then fix or reply with evidence. PR #13 added one more correct finding (1 of 1). Greptile also does not re-review fix commits, so a fix merged after a thread reply has been checked only by its author; say so rather than letting it read as reviewed.
+**5. Verify reviewer findings in both directions.** On PR #9 Greptile was mostly wrong on 1 of 5 findings; on PR #10 it was right on 3 of 3. Neither record justifies batch acceptance or batch dismissal. Open the cited symbol for each finding, then fix or reply with evidence. PR #13 and PR #14 added one more correct finding each. On this repo Greptile does re-review pushed fix commits, editing its summary in place ("Reviews (2)", new "Last reviewed commit"): PR #9's fix was re-reviewed about 37 minutes after the push and PR #10's about 4 minutes after, both 5/5. PRs #13 and #14 were merged 30 to 60 seconds after their fix push, so those fixes were checked only by their author. Before merging, confirm the summary's "Last reviewed commit" equals the head SHA, or say the fix is unreviewed. (An earlier version of this item said Greptile does not re-review fix commits. That was an unverified generalization from polls that gave up after 10 minutes; `gh api repos/<owner>/<repo>/issues/<n>/comments` refuted it.)
 
 **6. Version and environment claims: say how the environment was built, then check the lock and the interpreter.** "Any new environment shows X" is a claim about dependency resolution, not about the one venv you saw it in. Record the install command (`uv sync` honors `uv.lock`; `uv pip install ...` and `pip install <path>` ignore it), the Python version, and the resolved version, then compare with the lock and with the package's own Python floor:
 
@@ -62,6 +63,8 @@ grep -n 'pip install\|uv sync\|uv pip' provision/*.sh   # which installs bypass 
 ```
 
 One observation supports "seen in <how it was built>", not "any". PR #13 needed two passes on one sentence: the first fix scoped the claim to unlocked installs but still said new VMs could hit it, missing that pandas 3.x needs Python >= 3.11 and the VMs run 3.10.12. Open-items sections are claims too and get the same check.
+
+**7. A verification command is a claim too: run it and confirm its output shows what the text says.** A fixed-context grep (`grep -A N`) cuts off variable-length blocks without warning. On PR #14 the check in item 6 was `grep -A4 '^name = "pandas"' uv.lock`, which printed 1 of pandas 3.0.3's 9 `resolution-markers` (win32, Python >= 3.14) and hid the >= 3.11 split the prose relied on. The fix (`10f1c14`) targets the line that carries the whole fact: the project's direct dependency entries, one complete marker per pinned version.
 
 ## Why This Matters
 
@@ -97,6 +100,19 @@ Version claim (`best-practices/parquet-...md`, open items), three versions:
 - PR #13 as opened: "with pandas 3.1, ... fails ... any newly built environment shows it."
 - After Greptile (`d378a89`): scoped to unlocked installs, "so newly provisioned VMs can hit it."
 - Corrected: lock splits pandas 2.3.3 (< 3.11) / 3.0.3 (>= 3.11); pandas 3.x needs Python >= 3.11, so the 3.10.12 VMs cannot get it; only unlocked installs on >= 3.11 reach 3.1.
+
+Verification command that hid its own evidence (PR #14, `fef3239` -> `10f1c14`):
+
+```text
+$ grep -A4 '^name = "pandas"' uv.lock          # before: 3.0.3 block cut after its first marker
+...
+version = "3.0.3"
+resolution-markers = [
+    "python_full_version >= '3.14' and sys_platform == 'win32'",
+$ grep '{ name = "pandas", version' uv.lock    # after
+    { name = "pandas", version = "2.3.3", ..., marker = "python_full_version < '3.11'" },
+    { name = "pandas", version = "3.0.3", ..., marker = "python_full_version >= '3.11'" },
+```
 
 Overstated guarantee (same file):
 
