@@ -12,6 +12,7 @@ import re
 import glob
 import contextlib
 import pandas as pd
+import pytest
 from gated_cs.config import DEFAULTS
 from gated_cs.profiler.build_dictionary import build
 
@@ -20,7 +21,32 @@ _OUTLIER_TOKEN = "OUTLIER_SUBJECT"
 _OUTLIER_SUBSECOND = ".987654"
 
 
-def _mk_time(tmp_path):
+# every control must hold for parquet sources too: their synthetic samples are written as
+# parquet, which a raw byte scan can't reliably read (compressed, dictionary-encoded)
+@pytest.fixture(params=["csv", "parquet"])
+def fmt(request):
+    return request.param
+
+
+def _write(df, path, fmt):
+    if fmt == "parquet":
+        df.to_parquet(os.path.splitext(path)[0] + ".parquet", index=False)
+    else:
+        df.to_csv(path, index=False)
+
+
+def _rel(*parts, fmt):
+    return os.path.splitext(os.path.join(*parts))[0] + "." + fmt
+
+
+def _text(path):
+    # decoded content of a synthetic/artifact file, whatever its format
+    if path.endswith(".parquet"):
+        return pd.read_parquet(path).astype(str).to_csv(index=False)
+    return open(path, "rb").read().decode("utf-8", "ignore")
+
+
+def _mk_time(tmp_path, fmt="csv"):
     base = tmp_path / "TIME"
     (base / "oura_ring").mkdir(parents=True)
     (base / "redcap").mkdir(parents=True)
@@ -45,7 +71,7 @@ def _mk_time(tmp_path):
         dt = pd.Timestamp("2025-01-15") + pd.Timedelta(days=d, hours=3)
         rows.append({"subject_id": _OUTLIER_TOKEN,
                      "timestamp": dt.strftime("%Y-%m-%dT%H:%M:%S.%f"), "hr": 200})
-    pd.DataFrame(rows).to_csv(base / "oura_ring" / "TIME_oura_hr.csv", index=False)
+    _write(pd.DataFrame(rows), base / "oura_ring" / "TIME_oura_hr.csv", fmt)
 
     # demographics: DOB (birth quasi-identifier) + a single-event enroll date
     demo = pd.DataFrame({
@@ -54,21 +80,22 @@ def _mk_time(tmp_path):
         "enroll_date": [f"2024-1{(s % 2)+1}-0{(s % 9)+1}" for s in range(12)],
         "sex": ["F"] * 6 + ["M"] * 6,
     })
-    demo.to_csv(base / "redcap" / "TIME_demographics.csv", index=False)
+    _write(demo, base / "redcap" / "TIME_demographics.csv", fmt)
     return str(base)
 
 
 def _artifacts(out):
     dict_json = open(os.path.join(out, "dictionary.json")).read()
     md = open(os.path.join(out, "dictionary.md")).read()
-    synth = "".join(open(p).read() for p in
-                    glob.glob(os.path.join(out, "synthetic_samples", "**", "*.csv"), recursive=True))
+    synth = "".join(_text(p) for p in
+                    glob.glob(os.path.join(out, "synthetic_samples", "**", "*"), recursive=True)
+                    if os.path.isfile(p))
     return dict_json, md, synth
 
 
-def test_leak_free_across_all_three_artifacts(tmp_path):
+def test_leak_free_across_all_three_artifacts(tmp_path, fmt):
     out = str(tmp_path / "out")
-    build(_mk_time(tmp_path), out_dir=out, thresholds=DEFAULTS)
+    build(_mk_time(tmp_path, fmt), out_dir=out, thresholds=DEFAULTS)
     dict_json, md, synth = _artifacts(out)
     blob = dict_json + md + synth
     # no real subject ids
@@ -78,13 +105,13 @@ def test_leak_free_across_all_three_artifacts(tmp_path):
     assert "1990-07-15" not in blob and "1990-07" not in blob
 
 
-def test_below_k_minority_format_never_disclosed(tmp_path):
+def test_below_k_minority_format_never_disclosed(tmp_path, fmt):
     out = str(tmp_path / "out")
-    build(_mk_time(tmp_path), out_dir=out, thresholds=DEFAULTS)
+    build(_mk_time(tmp_path, fmt), out_dir=out, thresholds=DEFAULTS)
     dict_json, md, synth = _artifacts(out)
     blob = dict_json + md + synth
     d = json.load(open(os.path.join(out, "dictionary.json")))
-    ts = d["files"][os.path.join("oura_ring", "TIME_oura_hr.csv")]["columns"]["timestamp"]
+    ts = d["files"][_rel("oura_ring", "TIME_oura_hr.csv", fmt=fmt)]["columns"]["timestamp"]
     templates = [ts["format"]["template"]] + [m["template"] for m in ts["format"].get("minority", [])]
     # the < k subsecond format is neither in the descriptor nor rendered anywhere
     assert not any(".%f" in t for t in templates)
@@ -92,11 +119,11 @@ def test_below_k_minority_format_never_disclosed(tmp_path):
     assert not re.search(r"\.\d{6}", synth)
 
 
-def test_below_k_subgroup_distribution_suppressed(tmp_path):
+def test_below_k_subgroup_distribution_suppressed(tmp_path, fmt):
     out = str(tmp_path / "out")
-    build(_mk_time(tmp_path), out_dir=out, thresholds=DEFAULTS)
+    build(_mk_time(tmp_path, fmt), out_dir=out, thresholds=DEFAULTS)
     d = json.load(open(os.path.join(out, "dictionary.json")))
-    cols = d["files"][os.path.join("redcap", "TIME_demographics.csv")]["columns"]
+    cols = d["files"][_rel("redcap", "TIME_demographics.csv", fmt=fmt)]["columns"]
     # DOB is a birth quasi-identifier -> no temporal facets at all
     assert "temporal_coverage" not in cols["date_of_birth"]
     assert "temporal_distribution" not in cols["date_of_birth"]
@@ -104,11 +131,11 @@ def test_below_k_subgroup_distribution_suppressed(tmp_path):
     assert "temporal_distribution" not in cols["enroll_date"]
 
 
-def test_per_subject_intermediates_never_persist(tmp_path):
+def test_per_subject_intermediates_never_persist(tmp_path, fmt):
     out = str(tmp_path / "out")
     buf_out, buf_err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
-        build(_mk_time(tmp_path), out_dir=out, thresholds=DEFAULTS)
+        build(_mk_time(tmp_path, fmt), out_dir=out, thresholds=DEFAULTS)
     logged = buf_out.getvalue() + buf_err.getvalue()
     # nothing per-subject printed/logged during the build
     assert _OUTLIER_TOKEN not in logged
@@ -118,15 +145,15 @@ def test_per_subject_intermediates_never_persist(tmp_path):
     assert set(os.listdir(out)) <= expected_top, "unexpected intermediate written to out_dir"
     for p in glob.glob(os.path.join(out, "**", "*"), recursive=True):
         if os.path.isfile(p):
-            txt = open(p, "rb").read().decode("utf-8", "ignore")
+            txt = _text(p)
             assert _OUTLIER_TOKEN not in txt and "1990-07-15" not in txt
 
 
-def test_triangulation_smoke_outlier_not_recoverable(tmp_path):
+def test_triangulation_smoke_outlier_not_recoverable(tmp_path, fmt):
     out = str(tmp_path / "out")
-    build(_mk_time(tmp_path), out_dir=out, thresholds=DEFAULTS)
+    build(_mk_time(tmp_path, fmt), out_dir=out, thresholds=DEFAULTS)
     d = json.load(open(os.path.join(out, "dictionary.json")))
-    td = d["files"][os.path.join("oura_ring", "TIME_oura_hr.csv")]["columns"]["timestamp"][
+    td = d["files"][_rel("oura_ring", "TIME_oura_hr.csv", fmt=fmt)]["columns"]["timestamp"][
         "temporal_distribution"]
     # combining every disclosed distribution for the column must not narrow to 1 subject:
     # each disclosed aggregate describes >= k subjects / >= bin_min_count events.

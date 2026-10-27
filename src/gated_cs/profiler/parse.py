@@ -1,7 +1,5 @@
 import csv, re
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 from dataclasses import dataclass, field
 
 @dataclass
@@ -57,6 +55,9 @@ def read_table(path: str):
     Parquet is self-describing, so it has no delimiter, comment metadata or
     header offset; column names are coerced to str to match the text path."""
     if is_parquet(path):
+        # imported here so csv/tsv profiling still works on a host whose venv predates pyarrow
+        import pyarrow as pa
+        import pyarrow.parquet as pq
         nested = [f.name for f in pq.read_schema(path) if pa.types.is_nested(f.type)]
         if nested:
             raise ValueError(f"{path}: nested (list/struct/map) parquet columns are not "
