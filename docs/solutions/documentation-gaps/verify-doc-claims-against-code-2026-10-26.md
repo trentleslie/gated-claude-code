@@ -57,7 +57,7 @@ Write the command next to the flag (`build-synthetic --join-keys`). When a behav
 
 ```bash
 pip freeze | grep -i '^pandas'                          # what this venv has
-grep -A4 '^name = "pandas"' uv.lock                     # what the lock pins, per resolution marker
+grep '{ name = "pandas", version' uv.lock                # project's direct pins with their Python markers
 grep -n 'pip install\|uv sync\|uv pip' provision/*.sh   # which installs bypass the lock
 ```
 
