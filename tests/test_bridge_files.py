@@ -79,8 +79,22 @@ def test_requirements_gate_matches_uv_lock():
         "provision/requirements-gate.txt is stale; regenerate with: "
         "uv export --frozen --no-dev --no-emit-project > provision/requirements-gate.txt")
 
+def test_uv_lock_matches_pyproject():
+    # --frozen exports the lock as-is, so the export check alone passes a lock that no longer
+    # satisfies pyproject (e.g. a raised floor); with --no-deps the VM would keep the old pin
+    import shutil, subprocess, pytest
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed")
+    r = subprocess.run(["uv", "lock", "--check"], cwd=P.parent, capture_output=True, text=True)
+    assert r.returncode == 0, "uv.lock is stale vs pyproject.toml; run `uv lock`, then regenerate " \
+        "provision/requirements-gate.txt\n" + r.stderr[-500:]
+
 def test_requirements_gate_covers_runtime_dependencies():
-    import re, tomllib
+    import re
+    try:
+        import tomllib
+    except ModuleNotFoundError:   # Python 3.10
+        import tomli as tomllib
     deps = tomllib.loads((P.parent / "pyproject.toml").read_text())["project"]["dependencies"]
     pinned = {re.split(r"[=<> ;]", l, maxsplit=1)[0].lower() for l in REQ.read_text().splitlines()
               if l and not l.startswith((" ", "#"))}
