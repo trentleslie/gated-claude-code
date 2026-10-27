@@ -206,3 +206,14 @@ def test_submit_stamps_server_session_on_audit(server):
     entries = [json.loads(l) for l in open(server.gate_config["audit"]) if l.strip()]
     art = [e for e in entries if e.get("artifact", "").endswith("r.csv")]
     assert art and all(e.get("session") == sess for e in art)
+
+
+def test_synthetic_parquet_content_type(server, tmp_path):
+    (tmp_path / "dict" / "synthetic_samples" / "c.parquet").write_bytes(b"PAR1fake")
+    conn = _conn(server)
+    conn.request("GET", "/synthetic/c.parquet", headers={"X-Gate-Token": TOKEN})
+    resp = conn.getresponse()
+    assert resp.status == 200
+    assert resp.getheader("Content-Type").startswith("application/vnd.apache.parquet")
+    assert resp.read() == b"PAR1fake"
+    conn.close()

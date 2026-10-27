@@ -49,9 +49,13 @@ def _restore_dtype(s, dtype):
     try:
         if dtype.startswith("datetime64"):
             out = pd.to_datetime(s, errors="coerce", utc=True, format="mixed")
-            return out if "," in dtype else out.dt.tz_localize(None)
+            if "," not in dtype:
+                return out.dt.tz_localize(None)
+            return out.dt.tz_convert(dtype.split(",", 1)[1].rstrip("]").strip())
         if dtype in ("bool", "boolean"):
-            return pd.to_numeric(s, errors="coerce").round().astype("boolean" if s.isna().any() else "bool")
+            labels = s.map(lambda v: {"true": 1, "false": 0}.get(v.lower(), v) if isinstance(v, str) else v)
+            num = pd.to_numeric(labels, errors="coerce").round()
+            return num.astype("boolean" if num.isna().any() else "bool")
         if dtype == "category":
             return s.astype("category")
         if dtype.lower().startswith(("int", "uint", "float")):

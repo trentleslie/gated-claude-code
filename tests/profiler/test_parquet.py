@@ -104,3 +104,33 @@ def test_parquet_codebook_text(tmp_path):
     assert prof["role"] == "codebook"
     assert prof["codebook_text"]["question"] == ["How stressed?", "How tired?"]
     assert not (out / "synthetic_samples" / "survey").exists()
+
+
+def test_parquet_constant_bool_and_tz_preserved(tmp_path):
+    base = tmp_path / "data"
+    base.mkdir()
+    pd.DataFrame({"participant_id": REAL_IDS * 5,
+                  "consented": [True] * 60,
+                  "ts": pd.date_range("2024-01-01", periods=60, freq="D", tz="America/Los_Angeles")}
+                 ).to_parquet(base / "x.parquet", index=False)
+    out = tmp_path / "out"
+    build(str(base), str(out))
+    syn = pd.read_parquet(out / "synthetic_samples" / "x.parquet")
+    assert str(syn["ts"].dt.tz) == "America/Los_Angeles"
+    assert pd.api.types.is_bool_dtype(syn["consented"])
+
+
+def test_restore_dtype_bool_labels():
+    from gated_cs.profiler.build_dictionary import _restore_dtype
+    out = _restore_dtype(pd.Series(["True", "False", "True"]), "bool")
+    assert out.tolist() == [True, False, True] and out.dtype == bool
+
+
+def test_nested_parquet_column_fails_clearly(tmp_path):
+    import pytest
+    base = tmp_path / "data"
+    base.mkdir()
+    pd.DataFrame({"participant_id": REAL_IDS[:5], "meds": [["a", "b"]] * 5}
+                 ).to_parquet(base / "y.parquet", index=False)
+    with pytest.raises(ValueError, match="nested.*meds"):
+        build(str(base), str(tmp_path / "out"))

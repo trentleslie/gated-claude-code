@@ -20,7 +20,7 @@ import os, sys, json
 import numpy as np
 import pandas as pd
 from gated_cs.config import DEFAULTS
-from gated_cs.profiler.parse import parse_file
+from gated_cs.profiler.parse import read_table
 from gated_cs.profiler.discover import discover_files
 from gated_cs.profiler.subject_key import detect_subject_key
 from gated_cs.profiler.temporal import is_datetime_name, is_birth_name, epoch_unit
@@ -35,10 +35,7 @@ dictionary = json.load(open(os.path.join(OUT_DIR, "dictionary.json")))
 
 
 def load_df(path):
-    parsed = parse_file(path)
-    header_line = max(parsed.data_start_line - 1, 0)
-    df = pd.read_csv(path, sep=parsed.delimiter, skiprows=header_line, header=0, low_memory=False)
-    return df
+    return read_table(path)[1]
 
 
 def parse_ts(df, name):
@@ -170,7 +167,7 @@ for dfrec in discover_files(DATA_DIR):
             # (2) fidelity: synthetic vs real, this column
             syn_path = os.path.join(OUT_DIR, "synthetic_samples", dfrec.relpath)
             if os.path.exists(syn_path):
-                syn = pd.read_csv(syn_path)
+                syn = load_df(syn_path)
                 if name in syn.columns:
                     sts = pd.to_datetime(syn[name], errors="coerce", utc=True, format="mixed")
                     if pd.api.types.is_numeric_dtype(syn[name]):  # epoch synthetic
