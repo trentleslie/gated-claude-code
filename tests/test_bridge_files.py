@@ -56,3 +56,48 @@ def test_submit_derivation_validates_layer_name():
     p = subprocess.run(["bash", "provision/submit-derivation", "x.py", "--layer", "bad;name"],
                        capture_output=True, text=True)
     assert p.returncode == 2 and "layer name" in p.stderr
+
+
+REQ = P / "requirements-gate.txt"
+EXPORT = ["uv", "export", "--frozen", "--no-dev", "--no-emit-project"]
+
+def test_provision_installs_gate_venv_from_the_lock():
+    # the gate venv must get the tested uv.lock versions, not whatever is newest on provisioning
+    # day: hashed lock export first, then the package itself without re-resolving its deps
+    txt = (P / "provision.sh").read_text()
+    assert '--require-hashes -r "$SRC/provision/requirements-gate.txt"' in txt
+    assert '--no-deps "$SRC"' in txt
+    assert 'pip install --quiet "$SRC"' not in txt
+
+def test_requirements_gate_matches_uv_lock():
+    import shutil, subprocess, pytest
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed")
+    root = P.parent
+    out = subprocess.run(EXPORT, cwd=root, capture_output=True, text=True, check=True).stdout
+    assert REQ.read_text() == out, (
+        "provision/requirements-gate.txt is stale; regenerate with: "
+        "uv export --frozen --no-dev --no-emit-project > provision/requirements-gate.txt")
+
+def test_uv_lock_matches_pyproject():
+    # --frozen exports the lock as-is, so the export check alone passes a lock that no longer
+    # satisfies pyproject (e.g. a raised floor); with --no-deps the VM would keep the old pin
+    import shutil, subprocess, pytest
+    if shutil.which("uv") is None:
+        pytest.skip("uv not installed")
+    r = subprocess.run(["uv", "lock", "--check"], cwd=P.parent, capture_output=True, text=True)
+    assert r.returncode == 0, "uv.lock is stale vs pyproject.toml; run `uv lock`, then regenerate " \
+        "provision/requirements-gate.txt\n" + r.stderr[-500:]
+
+def test_requirements_gate_covers_runtime_dependencies():
+    import re
+    try:
+        import tomllib
+    except ModuleNotFoundError:   # Python 3.10
+        import tomli as tomllib
+    deps = tomllib.loads((P.parent / "pyproject.toml").read_text())["project"]["dependencies"]
+    pinned = {re.split(r"[=<> ;]", l, maxsplit=1)[0].lower() for l in REQ.read_text().splitlines()
+              if l and not l.startswith((" ", "#"))}
+    for d in deps:
+        name = re.split(r"[=<>!~\[ ;]", d, maxsplit=1)[0].lower()
+        assert name in pinned, f"{name} declared in pyproject but not pinned in requirements-gate.txt"

@@ -73,7 +73,13 @@ chown cs-exec:csbridge  /var/gate;             chmod 0710 /var/gate             
 echo "== 6. install the package into a venv (provides run-analysis / build-dictionary / gate-review) =="
 python3 -m venv /opt/gated-cs
 /opt/gated-cs/bin/pip install --quiet --upgrade pip
-/opt/gated-cs/bin/pip install --quiet "$SRC"
+# runtime deps at the exact uv.lock versions (hash-checked, per-Python markers), then the package
+# itself without re-resolving them, so a box gets the tested versions rather than whatever is
+# newest on provisioning day. Regenerate after any lock change:
+#   uv export --frozen --no-dev --no-emit-project > provision/requirements-gate.txt
+/opt/gated-cs/bin/pip install --quiet --require-hashes -r "$SRC/provision/requirements-gate.txt"
+/opt/gated-cs/bin/pip install --quiet --no-deps "$SRC"
+/opt/gated-cs/bin/pip freeze > /opt/gated-cs/installed-versions.txt   # what this box actually runs
 
 echo "== 7. bridge: submit-analysis (cs-gated), the wrapper (root:cs-exec 0750), narrow sudoers =="
 install -m 0755 "$SRC/provision/submit-analysis" /usr/local/bin/submit-analysis
