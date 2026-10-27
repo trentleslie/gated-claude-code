@@ -62,13 +62,19 @@ The third one is the non-obvious one, and Greptile found it: `uv export --frozen
 **4. Verify on the target interpreter, not the dev one.** The lock resolves differently per Python, and tests can depend on the stdlib version (`tomllib` exists only from 3.11; the coverage test falls back to `tomli`, added to the dev extra as `tomli>=1.1; python_version < '3.11'`). Reusable recipe:
 
 ```bash
-# run step 6 for real in a throwaway venv on the target Python line (from the repo root)
-trap 'rm -rf /tmp/gate310 build/' EXIT   # `pip install .` leaves build/ in the repo
-uv venv --seed -p 3.10 --python-preference only-managed /tmp/gate310
-/tmp/gate310/bin/pip install -q --require-hashes --only-binary :all: -r provision/requirements-gate.txt
-/tmp/gate310/bin/pip install -q --no-deps .
-/tmp/gate310/bin/pip freeze | grep -Ei '^(pandas|numpy|pyarrow)=='
-/tmp/gate310/bin/python -c "from gated_cs.profiler.build_dictionary import build"
+# run step 6 for real in a throwaway venv on the target Python line; the subshell keeps
+# set -e, cd and the cleanup trap from leaking into your shell
+(
+  set -e
+  ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
+  V=$(mktemp -d)
+  trap 'rm -rf "$V" "$ROOT/build"' EXIT   # `pip install .` leaves build/ in the repo
+  uv venv -q --seed -p 3.10 --python-preference only-managed "$V/venv"
+  "$V/venv/bin/pip" install -q --require-hashes --only-binary :all: -r provision/requirements-gate.txt
+  "$V/venv/bin/pip" install -q --no-deps .
+  "$V/venv/bin/pip" freeze | grep -Ei '^(pandas|numpy|pyarrow)=='
+  "$V/venv/bin/python" -c "from gated_cs.profiler.build_dictionary import build"
+)
 ```
 
 `--only-binary :all:` makes the install fail if any pin lacks a wheel for this Python and platform, instead of quietly building from source as the VM would.
