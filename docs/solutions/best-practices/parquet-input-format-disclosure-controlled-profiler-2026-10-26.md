@@ -161,7 +161,7 @@ syn = load_df(syn_path)
 - ~~Unknown timezone crashes the build~~ **Closed by PR #12:** `_restore_dtype` now also catches `KeyError` (`ZoneInfoNotFoundError` subclasses it), so an unrecognized zone such as a dateutil `tzfile(...)` repr leaves the fabricated column as generated. The zone is still recovered by string-splitting `str(dtype)`; recording `dtype.tz` as its own dictionary field would make it exact.
 - **Round-trip limits:** date-only tz-aware columns shift by the zone offset (values are read as UTC instants); a parquet bool column with nulls loads as `object` and is not restored to bool.
 - **Greptile never re-reviewed `83cf635`:** it does not auto re-review on push; PR #9 merged on fixes plus tests, not on a Greptile pass.
-- **Newer pandas fails one existing test:** in a fresh venv (pandas 3.1), `test_profile_file_mixed_tz_timestamps_no_warning` fails on unmodified master because a `Pandas4Warning` (`Series.values` dropping tz info) trips its no-warning assertion. Unrelated to parquet; any newly built environment shows it.
+- **Newer pandas fails one existing test:** with pandas 3.1, `test_profile_file_mixed_tz_timestamps_no_warning` fails on unmodified master because a `Pandas4Warning` (`Series.values` dropping tz info) trips its no-warning assertion. Observed in a venv built without the lock file (`uv pip install "pandas>=2.0" ...`); `uv.lock` pins pandas 2.3.3 / 3.0.3, so `uv sync` environments are unaffected. Unlocked installs resolve the newest pandas, and that includes `provision.sh` (`pip install "$SRC"`), so newly provisioned VMs can hit it. Unrelated to parquet.
 - **Scope:** parquet is profiler input and synthetic output only. Gate-released outputs stay CSV-only; `check_table` still fails closed on non-CSV.
 
 ## Related
