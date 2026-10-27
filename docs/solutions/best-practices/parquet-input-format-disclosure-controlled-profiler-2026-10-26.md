@@ -1,6 +1,7 @@
 ---
 title: "Adding an input format to the disclosure-controlled profiler: route every reader, round-trip dtypes, fail closed on nested types"
 date: 2026-10-26
+last_updated: 2026-10-26
 category: best-practices
 module: gated_cs.profiler
 problem_type: best_practice
@@ -113,7 +114,7 @@ Bool is a numeric dtype, so `profile_column` builds a histogram and the syntheti
 
 ### 6. A new runtime dependency is not deployed until it's in the gate venv
 
-`pyarrow>=14` is now a declared core dependency (`gate/derive.py` already read parquet, so it was needed implicitly before). Local tests passing in a fresh venv say nothing about existing ones: `parse.py` imports pyarrow at module top, so any venv not re-synced (`pip install -e .`, or re-provision for `/opt/gated-cs` on the VMs) fails to import the profiler at all, CSV included. Same class as the earlier missing-scipy-on-the-gate incident (auto memory [claude]).
+`pyarrow>=14` is now a declared core dependency (`gate/derive.py` already read parquet, so it was needed implicitly before). Local tests passing in a fresh venv say nothing about existing ones; until a venv is re-synced (`pip install -e .`, or re-provision for `/opt/gated-cs` on the VMs) it can't read parquet. PR #12 moved the pyarrow import inside `read_table`'s parquet branch, so an un-synced host still profiles CSV/TSV; before that, a top-level import broke the whole profiler. Keep new format dependencies imported lazily at the format branch for the same reason. Same class as the earlier missing-scipy-on-the-gate incident (auto memory [claude]).
 
 ## Why This Matters
 
@@ -153,13 +154,14 @@ def load_df(path):
 syn = load_df(syn_path)
 ```
 
-## Open items (as of 2026-10-26)
+## Open items (as of 2026-10-26, after PR #12)
 
-- **Leak-suite coverage gap:** `tests/profiler/test_nondisclosure.py` `_artifacts()` gathers only `synthetic_samples/**/*.csv`, and its fixtures are all CSV. The outlier / DOB / format-leak scenarios have not been run against parquet output; `test_parquet.py` covers real IDs and dictionary dates only. Add a parquet variant that decodes samples with `pd.read_parquet` (a raw byte scan won't reliably see values in compressed, dictionary-encoded parquet).
-- **Not deployed:** no VM gate venv has pyarrow yet, and the repo's own local `.venv` doesn't either (profiler import fails there until re-synced). Making the pyarrow import lazy inside the parquet branch would keep CSV-only hosts working.
-- **Unknown timezone crashes the build:** `_restore_dtype` recovers the zone by string-splitting `str(dtype)`, which works for IANA names and fixed offsets. An unrecognized zone (e.g. a dateutil `tzfile(...)` repr) raises `ZoneInfoNotFoundError`, a `KeyError` subclass that escapes `except (TypeError, ValueError)`. Fix: widen the except, or record `dtype.tz` as its own dictionary field.
+- ~~Leak-suite coverage gap~~ **Closed by PR #12:** all five mechanical non-disclosure tests are parametrized over csv and parquet sources (`fmt` fixture), and artifacts are decoded with `pd.read_parquet` instead of byte-scanned. Every parquet variant passed on first run, so no leak was hiding; the gap was coverage only.
+- **Not deployed:** no VM gate venv has pyarrow yet, and the repo's own local `.venv` doesn't either. Since PR #12 that only blocks parquet; CSV profiling works regardless (`test_csv_profiling_works_without_pyarrow`).
+- ~~Unknown timezone crashes the build~~ **Closed by PR #12:** `_restore_dtype` now also catches `KeyError` (`ZoneInfoNotFoundError` subclasses it), so an unrecognized zone such as a dateutil `tzfile(...)` repr leaves the fabricated column as generated. The zone is still recovered by string-splitting `str(dtype)`; recording `dtype.tz` as its own dictionary field would make it exact.
 - **Round-trip limits:** date-only tz-aware columns shift by the zone offset (values are read as UTC instants); a parquet bool column with nulls loads as `object` and is not restored to bool.
 - **Greptile never re-reviewed `83cf635`:** it does not auto re-review on push; PR #9 merged on fixes plus tests, not on a Greptile pass.
+- **Newer pandas fails one existing test:** in a fresh venv (pandas 3.1), `test_profile_file_mixed_tz_timestamps_no_warning` fails on unmodified master because a `Pandas4Warning` (`Series.values` dropping tz info) trips its no-warning assertion. Unrelated to parquet; any newly built environment shows it.
 - **Scope:** parquet is profiler input and synthetic output only. Gate-released outputs stay CSV-only; `check_table` still fails closed on non-CSV.
 
 ## Related
@@ -167,4 +169,4 @@ syn = load_df(syn_path)
 - `docs/solutions/best-practices/synthetic-data-sdc-mechanical-nondisclosure-gate-2026-07-22.md`: the leak-test rules this doc qualifies (birth dates never in any artifact still holds).
 - `docs/solutions/security/host-boundary-scope.md`: gate release check is CSV-only, unchanged here.
 - Vault `docs/solutions/best-practices/fail-closed-guards-must-not-no-op-on-absent-input-2026-07-13.md`: a guard wired on one input path but not another, and a case where Greptile's P1s were all real.
-- PR: https://github.com/trentleslie/gated-claude-code/pull/9
+- PRs: https://github.com/trentleslie/gated-claude-code/pull/9 (feature), https://github.com/trentleslie/gated-claude-code/pull/12 (follow-ups)
