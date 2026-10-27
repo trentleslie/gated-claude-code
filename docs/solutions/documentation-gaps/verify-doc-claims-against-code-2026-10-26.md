@@ -123,7 +123,7 @@ Overstated guarantee (same file):
 
 - Unconfirmed whether the `--join-keys` correction has reached the collaborator who received the original answer.
 - `scripts/offline_reid_assess.py` still does not intersect contributor sets across elements. That is an unfixed code gap, not a decision; only the wording was corrected.
-- Wiki pages (`docs/wiki/gated-analysis-what-we-built`, `gated-analysis-setup-guide`) describe instances as reproduced identically and freshly provisioned boxes as self-contained. The gate code is identical, but the venv is installed unlocked (see the parquet doc's open items), so package versions follow the provisioning date. Worth a qualifier when those pages are next touched.
+- Wiki pages (`docs/wiki/gated-analysis-what-we-built`, `gated-analysis-setup-guide`) describe instances as reproduced identically and freshly provisioned boxes as self-contained. The gate code is identical, but the existing VMs' venvs were installed unlocked, so their package versions follow each box's provisioning date; since PR #16 a fresh provision installs from the lock (`best-practices/install-deploy-venv-from-uv-lock-2026-10-26.md`), though still without scikit-learn, scipy and statsmodels. Worth a qualifier when those pages are next touched.
 - `security/host-boundary-scope.md` says re-id risk "is assessed offline" without the per-element qualifier. Accurate but unqualified; worth the same one-line scoping if that doc is next touched.
 
 ## Related

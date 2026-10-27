@@ -114,7 +114,7 @@ Bool is a numeric dtype, so `profile_column` builds a histogram and the syntheti
 
 ### 6. A new runtime dependency is not deployed until it's in the gate venv
 
-`pyarrow>=14` is now a declared core dependency (`gate/derive.py` already read parquet, so it was needed implicitly before). Local tests passing in a fresh venv say nothing about existing ones; until a venv is re-synced (`pip install -e .`, or re-provision for `/opt/gated-cs` on the VMs) it can't read parquet. PR #12 moved the pyarrow import inside `read_table`'s parquet branch, so an un-synced host still profiles CSV/TSV; before that, a top-level import broke the whole profiler. Keep new format dependencies imported lazily at the format branch for the same reason. Same class as the earlier missing-scipy-on-the-gate incident (auto memory [claude]).
+`pyarrow>=14` is now a declared core dependency (`gate/derive.py` already read parquet, so it was needed implicitly before). Local tests passing in a fresh venv say nothing about existing ones; until a venv is re-synced (`pip install -e .` locally; re-provision for `/opt/gated-cs` on the VMs, which since PR #16 installs from the lock, see `install-deploy-venv-from-uv-lock-2026-10-26.md`) it can't read parquet. PR #12 moved the pyarrow import inside `read_table`'s parquet branch, so an un-synced host still profiles CSV/TSV; before that, a top-level import broke the whole profiler. Keep new format dependencies imported lazily at the format branch for the same reason. Same class as the earlier missing-scipy-on-the-gate incident (auto memory [claude]).
 
 ## Why This Matters
 
