@@ -25,7 +25,7 @@ A collaborator onboarding a new dataset asked whether filenames, headers and col
 What onboarding actually needs:
 
 - Files the profiler can discover: `.csv` / `.tsv`, and since PR #9 `.parquet` / `.pq`.
-- A recognizable subject key (`subject_id`, `participant_id`, `public_client_id`, `record_id`, `id`, ...) or an explicit `--join-keys`.
+- A recognizable subject-key column name (`time_traveler_id`, `subject_id`, `participant_id`, `public_client_id`, `user_id`, `record_id`, `id`). Profiling (`build-dictionary`) detects it by name only and has no override; `--join-keys` exists only on `build-synthetic`, where it changes which columns are remapped to the `SYNTH_` pool, not what was profiled.
 - An authorized human operator to run profiling as `cs-exec`. No LLM reads raw data at any stage, including dictionary bootstrapping (auto memory [claude]).
 - Optional: codebook files (`questions` / `response_options` under `raw/`) and `#` metadata lines in text files.
 

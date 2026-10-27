@@ -105,7 +105,10 @@ is the offline gated assessment — run where the real TIME data lives (WARP box
 `/procedure/data/local_data`), doing cross-column *and* cross-file triangulation over the real
 ~37-subject pool, which a synthetic-fixture CI can never cover. Treat the mechanical gate as
 "the controls are wired and can't silently regress," and the offline re-id assessment as
-"disclosure is actually safe." Conflating the two is the trap.
+"the real cohort passes the implemented per-element checks." Conflating the two is the trap. Even the
+offline pass is not proof against combined disclosure: it counts contributors per disclosed element and
+tallies sole contributors across files, but never intersects contributor sets, so two elements with
+five contributors each that share only one person go undetected.
 
 **This is no longer hypothetical — it is the strongest evidence in this doc.** The offline gate
 (`scripts/offline_reid_assess.py`), run on the real cohort, found **15 re-identification leaks that
@@ -145,6 +148,7 @@ assert td["n_contributors"] >= DEFAULTS.k
 for hist_key in ("session_minutes", "gap_hours", "coverage_days"):
     for b in td[hist_key]:
         assert b["count"] >= DEFAULTS.bin_min_count
+        assert b["n_subjects"] >= DEFAULTS.k   # one heavy subject can fill a bin on its own
 assert td["diurnal_blocks"].get("00-04", 0.0) < 0.5   # outlier's 3am slot stays diluted
 ```
 
