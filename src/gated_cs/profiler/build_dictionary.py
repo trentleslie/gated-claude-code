@@ -63,7 +63,7 @@ def _restore_dtype(s, dtype):
             if num.isna().any() and dtype.startswith(("int", "uint")):
                 return num.round().astype(dtype.capitalize().replace("Uint", "UInt"))
             return num.astype(dtype)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, KeyError):  # KeyError: unknown tz (ZoneInfoNotFoundError)
         pass
     return s
 

@@ -134,3 +134,24 @@ def test_nested_parquet_column_fails_clearly(tmp_path):
                  ).to_parquet(base / "y.parquet", index=False)
     with pytest.raises(ValueError, match="nested.*meds"):
         build(str(base), str(tmp_path / "out"))
+
+
+def test_restore_dtype_unknown_timezone_keeps_generated_values():
+    from gated_cs.profiler.build_dictionary import _restore_dtype
+    s = pd.Series(["2024-01-01 08:00:00", "2024-01-02 09:00:00"])
+    # a dateutil tz renders as an unparseable zone name; the cast is best-effort, never a crash
+    for dtype in ("datetime64[ns, tzfile('/usr/share/zoneinfo/US/Pacific')]",
+                  "datetime64[ns, Not/AZone]"):
+        assert _restore_dtype(s, dtype).tolist() == s.tolist()
+
+
+def test_csv_profiling_works_without_pyarrow(tmp_path):
+    import subprocess, sys
+    pd.DataFrame({"participant_id": REAL_IDS, "age": range(12)}).to_csv(tmp_path / "d.csv", index=False)
+    code = ("import sys; sys.modules['pyarrow'] = None; sys.modules['pyarrow.parquet'] = None\n"
+            "from gated_cs.profiler.build_dictionary import build\n"
+            f"build({str(tmp_path)!r}, {str(tmp_path / 'out')!r})\n")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                       env={**os.environ, "PYTHONPATH": "src"})
+    assert r.returncode == 0, r.stderr[-500:]
+    assert (tmp_path / "out" / "synthetic_samples" / "d.csv").exists()
