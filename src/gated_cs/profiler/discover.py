@@ -21,7 +21,7 @@ def _classify_role(stage: str, filename: str) -> str:
                 return "codebook"
     return "data"
 
-def discover_files(data_dir: str, exts=(".csv", ".tsv")) -> list:
+def discover_files(data_dir: str, exts=(".csv", ".tsv", ".parquet", ".pq")) -> list:
     out = []
     for root, dirs, files in os.walk(data_dir):
         dirs[:] = [d for d in dirs if d != CHECKPOINT_DIR]  # prune, don't descend

@@ -2,7 +2,7 @@
 name = "gated-cs"
 version = "0.1.0"
 requires-python = ">=3.10"
-dependencies = ["pandas>=2.0"]  # ACRO deferred to a later hardening pass; v1 uses deterministic SDC rules
+dependencies = ["pandas>=2.0", "pyarrow>=14"]  # ACRO deferred to a later hardening pass; v1 uses deterministic SDC rules
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]

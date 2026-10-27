@@ -11,7 +11,7 @@ Endpoints:
   GET  /dictionary.json     -- auth required
   GET  /dictionary.md       -- auth required
   GET  /synthetic           -- auth required; list of filenames
-  GET  /synthetic/<name>    -- auth required; csv content
+  GET  /synthetic/<name>    -- auth required; csv or parquet content
   POST /submit              -- auth required; body = raw script bytes
 
 Auth: header ``X-Gate-Token`` must equal the contents of GATE_TOKEN_FILE,
@@ -122,7 +122,9 @@ class GateAPIHandler(BaseHTTPRequestHandler):
             if not name:
                 self._send_json(404, {"error": "not found"})
                 return
-            self._serve_file(os.path.join(syn_dir, name), "text/csv")
+            ctype = ("application/vnd.apache.parquet"
+                     if name.lower().endswith((".parquet", ".pq")) else "text/csv")
+            self._serve_file(os.path.join(syn_dir, name), ctype)
             return
 
         self._send_json(404, {"error": "not found"})
