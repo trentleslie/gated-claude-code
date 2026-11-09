@@ -33,7 +33,7 @@ Kept under one namespaced key so the SLE core stays untouched.
 | `evidence_state.note` | string | One line, no numbers |
 | `resolvability.value` | `resolvable` / `partial` / `not_resolvable` / `undetermined` | Can Arivale data test the claim? |
 | `resolvability.variables` | list | Backticked dictionary variable names that would test it |
-| `resolvability.repeat_measurements` | `present` / `absent` / `unknown` | From `find_vars.py`'s longitudinal signal |
+| `resolvability.repeat_measurements` | `present` / `absent` / `unknown` | `present` only when `find_vars.py` reports `longitudinal: present` (the profiler saw repeat events per participant); otherwise `unknown`. A date range alone (temporal coverage) is not evidence of repeat draws |
 | `resolvability.missing` | string | Required when `undetermined`: the fact the dictionary could not answer |
 | `resolvability.note` | string | One line, no numbers |
 

@@ -148,10 +148,12 @@ def test_output_keys_are_value_free():
 
 def test_longitudinal_states():
     by_col = {h["column"]: h for h in find_vars.find(DICT, ["cer", "gait"])}
-    assert by_col["Cer(d18:1/16:0)"]["longitudinal"] == "present"
-    assert by_col["ceramide (d18:1/24:0)"]["longitudinal"] == "present"      # temporal_coverage only
-    assert by_col["ceramide (d18:1/24:0)"]["cadence"] == "annual"
-    assert by_col["gait_speed"]["longitudinal"] == "absent"                 # date column, no facet
+    assert by_col["Cer(d18:1/16:0)"]["longitudinal"] == "present"           # temporal_distribution = repeat events
+    assert by_col["Cer(d18:1/16:0)"]["cadence"] == "quarterly"
+    # temporal_coverage alone is emitted even when each participant has one draw: not evidence of repeats
+    assert by_col["ceramide (d18:1/24:0)"]["longitudinal"] == "unknown"
+    assert "cadence" not in by_col["ceramide (d18:1/24:0)"]
+    assert by_col["gait_speed"]["longitudinal"] == "unknown"                # date column, no facet
     assert by_col["Cer(d18:1/18:0)"]["longitudinal"] == "no_date_column"    # derived layer, no subject_key
 
 
@@ -161,7 +163,7 @@ def test_find_vars_cli():
     assert res.returncode == 0, res.stderr
     rows = [json.loads(ln) for ln in res.stdout.splitlines() if ln.strip()]
     assert rows == [{"file": "frailty_survey.tsv", "column": "gait_speed", "dtype": "float64",
-                     "longitudinal": "absent"}]
+                     "longitudinal": "unknown"}]
 
 
 # ---- SKILL.md (the brief) ------------------------------------------------------------
@@ -207,3 +209,35 @@ def test_reference_example_passes_checker():
     ref = (SKILL_DIR / "references" / "hypothesis-record.md").read_text()
     block = ref.split("```json", 1)[1].split("```", 1)[0]
     assert errors_for([json.loads(block)]) == []
+
+
+# ---- check_record: field types (Greptile PR #21) ----------------------------------
+def test_structured_evidence_rejected():
+    recs = good()
+    recs[0]["evidence"] = [{"HR": 1.34, "n": 412}]
+    assert any("evidence" in e and "string" in e for e in errors_for(recs))
+
+
+def test_non_string_alternative_rejected():
+    recs = good()
+    recs[0]["alternatives"] = ["ok", {"n": 412}]
+    assert any("alternatives" in e for e in errors_for(recs))
+
+
+def test_core_scalar_types():
+    recs = good()
+    recs[0]["selected"] = "yes"
+    recs[0]["episode"] = "1"
+    recs[0]["critic_score"] = True
+    errs = errors_for(recs)
+    for f in ("selected", "episode", "critic_score"):
+        assert any(f in e for e in errs), f
+
+
+def test_extension_types():
+    recs = good()
+    recs[0]["x_stage2"]["resolvability"]["variables"] = [{"n": 412}]
+    recs[0]["x_stage2"]["evidence_state"]["note"] = ["412"]
+    errs = errors_for(recs)
+    assert any("variables" in e for e in errs)
+    assert any("evidence_state.note" in e for e in errs)

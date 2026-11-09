@@ -56,24 +56,64 @@ def _numbers(text):
     return _NUMBER.findall(_EXEMPT.sub(" ", text))
 
 
+def _is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _type_errors(rec, where):
+    """Documented field types: anything else could carry structured values past the text scan."""
+    errs = []
+    for f in ("version_id", "claim", "plan", "evidence", "critique"):
+        if f in rec and not isinstance(rec[f], str):
+            errs.append(f"{where}: '{f}' must be a string")
+    for f in ("parents", "alternatives"):
+        if f in rec and not (isinstance(rec[f], list) and all(isinstance(v, str) for v in rec[f])):
+            errs.append(f"{where}: '{f}' must be a list of strings")
+    if "episode" in rec and not (isinstance(rec["episode"], int) and not isinstance(rec["episode"], bool)):
+        errs.append(f"{where}: 'episode' must be an integer")
+    if "critic_score" in rec and not _is_num(rec["critic_score"]):
+        errs.append(f"{where}: 'critic_score' must be a number")
+    if "selected" in rec and not isinstance(rec["selected"], bool):
+        errs.append(f"{where}: 'selected' must be true or false")
+    x = rec.get("x_stage2")
+    if isinstance(x, dict):
+        for part, keys in (("evidence_state", ("value", "source", "note")),
+                           ("resolvability", ("value", "repeat_measurements", "missing", "note"))):
+            sub = x.get(part)
+            if not isinstance(sub, dict):
+                errs.append(f"{where}: 'x_stage2.{part}' must be an object")
+                continue
+            for k in keys:
+                if k in sub and not isinstance(sub[k], str):
+                    errs.append(f"{where}: 'x_stage2.{part}.{k}' must be a string")
+        r = x.get("resolvability")
+        if isinstance(r, dict) and not (isinstance(r.get("variables"), list)
+                                        and all(isinstance(v, str) for v in r["variables"])):
+            errs.append(f"{where}: resolvability.variables must be a list of backticked names (strings)")
+    return errs
+
+
 def check_records(records):
     errors, seen = [], set()
     for i, rec in enumerate(records, 1):
+        if not isinstance(rec, dict):
+            errors.append(f"line {i}: a version must be a JSON object")
+            continue
         vid = rec.get("version_id", f"<line {i}>")
         where = f"line {i} ({vid})"
         for f in SLE_CORE:
             if f not in rec:
                 errors.append(f"{where}: missing SLE core field '{f}'")
+        errors.extend(_type_errors(rec, where))
         if vid in seen:
             errors.append(f"{where}: duplicate version_id '{vid}'")
         parents = rec.get("parents", [])
         if not isinstance(parents, list):
-            errors.append(f"{where}: 'parents' must be a list")
             parents = []
         for p in parents:
             if p not in seen:
                 errors.append(f"{where}: parent '{p}' is not an earlier version in this file")
-        seen.add(vid)
+        seen.add(vid if isinstance(vid, str) else repr(vid))
 
         x = rec.get("x_stage2")
         if not isinstance(x, dict):
@@ -89,8 +129,6 @@ def check_records(records):
                 errors.append(f"{where}: resolvability '{r.get('value')}' not in {sorted(RESOLVABILITY)}")
             if r.get("repeat_measurements") not in REPEAT:
                 errors.append(f"{where}: resolvability.repeat_measurements must be one of {sorted(REPEAT)}")
-            if not isinstance(r.get("variables"), list):
-                errors.append(f"{where}: resolvability.variables must be a list of backticked names")
             if r.get("value") == "undetermined" and not (r.get("missing") or "").strip():
                 errors.append(f"{where}: resolvability 'undetermined' needs 'missing' to name what is unknown")
 

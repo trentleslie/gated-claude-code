@@ -45,7 +45,10 @@ test it (resolvability).
 
    `python3 ~/.claude/skills/hypothesize/find_vars.py ~/analysis/dictionary.json "<pattern>" "<variant>" ...`
 
-   It returns only file, column, dtype and a longitudinal signal. Set `x_stage2.resolvability`:
+   It returns only file, column, dtype and a longitudinal signal: `present` means participants have
+   repeat events in that file; `unknown` means the dictionary cannot tell (a date range alone does not
+   show repeat draws); `no_date_column` means no dates. Set `repeat_measurements` to `present` only for
+   `present`. Then set `x_stage2.resolvability`:
    `resolvable`, `partial`, `not_resolvable` (a needed variable is genuinely absent) or `undetermined`
    (the dictionary cannot answer, e.g. no longitudinal signal; name the gap in `missing`). Record the
    patterns you tried in the note. Use single-variable facts only: do not combine coverage figures.

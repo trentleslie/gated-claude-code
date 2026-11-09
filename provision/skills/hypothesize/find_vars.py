@@ -6,11 +6,14 @@ Stdlib only. Usage:
 Patterns are case-insensitive substrings (not regexes, so lipid names need no escaping).
 
 Prints one JSON object per match: file, column, dtype, and a longitudinal signal for the file:
-  present         a date-like column carries temporal_distribution or temporal_coverage (cadence shown)
-  absent          date-like columns exist but carry neither facet
+  present         a date-like column carries temporal_distribution, which the profiler emits only when
+                  participants have repeat events (single-event guard); cadence shown
+  unknown         date-like columns exist without temporal_distribution. temporal_coverage alone does
+                  NOT show repeats: it is emitted even when every participant has a single draw
   no_date_column  the file has no date-like column
-Never prints histograms, counts, month ranges or category values. A missing facet can be a profiler
-limitation, so 'absent' or 'no_date_column' means resolvability 'undetermined', never 'not_resolvable'.
+Never prints histograms, counts, month ranges or category values. Only 'present' supports
+repeat_measurements 'present'; 'unknown' or 'no_date_column' means resolvability 'undetermined' for a
+longitudinal claim, never 'not_resolvable'.
 """
 import json
 import re
@@ -21,20 +24,16 @@ _DATETIME_NAME = re.compile(r"date|time|timestamp|_at$", re.I)
 
 
 def _longitudinal(columns):
-    dated = {n: c for n, c in columns.items() if _DATETIME_NAME.search(n)}
-    dated.update({n: c for n, c in columns.items()
-                  if isinstance(c, dict) and (c.get("temporal_distribution") or c.get("temporal_coverage"))})
+    dated = {n: c for n, c in columns.items()
+             if _DATETIME_NAME.search(n)
+             or (isinstance(c, dict) and (c.get("temporal_distribution") or c.get("temporal_coverage")))}
     if not dated:
         return "no_date_column", None
     for c in dated.values():
-        if not isinstance(c, dict):
-            continue
-        facet = c.get("temporal_distribution") or c.get("temporal_coverage")
-        if facet:
-            # prefer coverage cadence (whole-file shape); fall back to distribution cadence
-            cad = (c.get("temporal_coverage") or {}).get("cadence") or (c.get("temporal_distribution") or {}).get("cadence")
-            return "present", cad
-    return "absent", None
+        td = c.get("temporal_distribution") if isinstance(c, dict) else None
+        if td:
+            return "present", (td or {}).get("cadence")
+    return "unknown", None
 
 
 def find(dictionary, patterns):
