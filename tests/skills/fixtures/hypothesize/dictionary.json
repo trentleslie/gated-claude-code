@@ -1,0 +1,52 @@
+{
+  "data_dir": "/synthetic",
+  "sources": {
+    "metabolomics": {
+      "metabolomics_corrected.tsv": {
+        "columns": {
+          "public_client_id": {"dtype": "object", "n": 100},
+          "Cer(d18:1/16:0)": {"dtype": "float64", "n": 100, "histogram": [3, 9, 27]},
+          "sample_date": {"dtype": "object", "n": 100, "temporal_coverage": {"min_month": "2015-01", "max_month": "2018-12", "cadence": "monthly"},
+                          "temporal_distribution": {"cadence": "quarterly"}}
+        },
+        "subject_key": "public_client_id",
+        "cohort_n": 40
+      }
+    }
+  },
+  "files": {
+    "metabolomics_corrected.tsv": {
+      "columns": {
+        "public_client_id": {"dtype": "object", "n": 100},
+        "Cer(d18:1/16:0)": {"dtype": "float64", "n": 100, "histogram": [3, 9, 27]},
+        "sample_date": {"dtype": "object", "n": 100, "temporal_coverage": {"min_month": "2015-01", "max_month": "2018-12", "cadence": "monthly"},
+                        "temporal_distribution": {"cadence": "quarterly"}}
+      },
+      "subject_key": "public_client_id",
+      "cohort_n": 40
+    },
+    "lipids_panel.tsv": {
+      "columns": {
+        "public_client_id": {"dtype": "object", "n": 50},
+        "ceramide (d18:1/24:0)": {"dtype": "float64", "n": 50, "top_values": ["0.12", "0.34"]},
+        "draw_timestamp": {"dtype": "object", "n": 50, "temporal_coverage": {"min_month": "2016-02", "max_month": "2016-09", "cadence": "annual"}}
+      },
+      "subject_key": "public_client_id",
+      "cohort_n": 50
+    },
+    "frailty_survey.tsv": {
+      "columns": {
+        "public_client_id": {"dtype": "object", "n": 30},
+        "gait_speed": {"dtype": "float64", "n": 30},
+        "visit_date": {"dtype": "object", "n": 30}
+      },
+      "subject_key": "public_client_id",
+      "cohort_n": 30
+    },
+    "metabolomics_imputed": {
+      "columns": {
+        "Cer(d18:1/18:0)": {"dtype": "float64", "n": 80}
+      }
+    }
+  }
+}
