@@ -241,3 +241,9 @@ def test_extension_types():
     errs = errors_for(recs)
     assert any("variables" in e for e in errs)
     assert any("evidence_state.note" in e for e in errs)
+
+
+def test_numbers_in_evidence_source_flagged():
+    recs = good()
+    recs[0]["x_stage2"]["evidence_state"]["source"] = "PMC7806657; Arivale HR was 1.34 in 412 participants"
+    assert any("evidence_state.source" in e for e in errors_for(recs))

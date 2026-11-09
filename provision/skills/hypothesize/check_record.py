@@ -46,7 +46,7 @@ def _texts(rec):
             yield f"alternatives[{i}]", a
     x = rec.get("x_stage2") or {}
     for part in ("evidence_state", "resolvability"):
-        for f in ("note", "missing"):
+        for f in ("note", "missing", "source"):
             v = (x.get(part) or {}).get(f)
             if isinstance(v, str):
                 yield f"x_stage2.{part}.{f}", v
