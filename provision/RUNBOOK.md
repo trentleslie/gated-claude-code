@@ -37,11 +37,17 @@ Sandbox (bubblewrap 0.11, wraps only the untrusted child inside `run_analysis`):
 ## Phase 2 — real data (Trent's step)
 
 3. Mount / copy the real Arivale CSV/TSV data into `/data/arivale` (stays owned `cs-exec:cs-exec`, mode 700).
-4. Build the PHI-safe dictionary as cs-exec:
+4. Build the PHI-safe dictionary as cs-exec **into a private staging dir**, never straight into
+   `/var/gate/dict` (the analyst workspace links there, so a direct build is visible before the audit):
    ```bash
-   sudo -u cs-exec /opt/gated-cs/bin/build-dictionary /data/arivale --out /var/gate/dict
+   S=/var/gate/dict-staging; rm -rf "$S"; install -d -o cs-exec -g cs-exec -m 0700 "$S"
+   sudo -u cs-exec /opt/gated-cs/bin/build-dictionary /data/arivale --out "$S"
+   sudo -u cs-exec /opt/gated-cs/bin/build-synthetic --dictionary "$S/dictionary.json" --out "$S"
    ```
-   Review `/var/gate/dict/dictionary.md` by eye; confirm no raw values before handing the dictionary to cs-gated.
+   Review `$S/dictionary.md` and `$S/synthetic_samples` by eye; confirm no raw values. Only then publish
+   (back up any existing `/var/gate/dict`, `rm -f "$S/reid_report.json"`, `mv "$S" /var/gate/dict`,
+   `chown -R cs-exec:csbridge`, dirs 750 / files 640). Canonical steps: README.md step 6(b).
+   (The historical entries below record the original direct builds; follow this step, not them.)
 
 ## Phase 3 — the gated Claude Science instance (DONE 2026-07-15, pending auth)
 
