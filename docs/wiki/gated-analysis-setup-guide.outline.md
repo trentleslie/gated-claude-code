@@ -44,9 +44,9 @@ tar czf - --exclude=.git --exclude=.venv . | ssh root@VM 'mkdir -p /opt/gated-cs
 bash /opt/gated-cs-src/provision/provision.sh /opt/gated-cs-src
 ```
 
-The permission model, which is the entire safety guarantee, is as follows. The raw data directory is owned by `cs-exec` with mode 700. The audit log and the quarantine queue are `cs-exec`-private. Two shared directories carry the hand-off: an `incoming` directory the brain writes and the gate reads, and a `results` directory the gate writes and the brain reads, both group-owned by the shared `csbridge` group. The gate's working root is traversable by the group but not listable. Verify, as the brain user, that reading the raw data is denied while the results directory is readable.
+The permission model, which is the entire safety guarantee, is as follows. The raw data directory is owned by `cs-exec` with mode 700. The audit log and the quarantine queue are `cs-exec`-private. Two shared directories carry the hand-off: an `incoming` directory the brain writes and the gate reads, and a `results` directory the gate writes and the brain reads, both group-owned by the shared `csbridge` group. The gate's working root is traversable by the group but not listable. Verify, as the brain user, that reading the raw data is denied while the results directory is readable. Make the check fail closed: confirm the data path exists before probing it (a probe of a nonexistent path also reports denied and proves nothing) and print the path that was probed. The repository README's step 3 has a copy-paste version.
 
-The sandbox that runs the untrusted analysis script must wrap only the child process, not the gate itself, so that the gate's audit and queue writes remain outside the sandbox and unreachable by the submitted code. This is enforced inside the executor. Confirm on the VM that bubblewrap functions for a non-root user and that a sandboxed process has no network.
+The sandbox that runs the untrusted analysis script must wrap only the child process, not the gate itself, so that the gate's audit and queue writes remain outside the sandbox and unreachable by the submitted code. This is enforced inside the executor. Confirm on the VM that bubblewrap functions for a non-root user and that a sandboxed process has no network. The network test must emit a distinguishable result (the README's smoke test writes `net_blocked` or `net_OPEN` into a gated output); a test that swallows both success and failure cannot show isolation.
 
 ## Phase 2: profile the data (build the dictionary and synthetic surface)
 
@@ -56,20 +56,26 @@ Mount or copy the raw data into its directory. A mounted snapshot commonly arriv
 lock-gate-data /path/to/data
 ```
 
-Point the executor at that directory. The bridge wrapper hard-codes the data path so the brain cannot influence it, and provisioning defaults it to a placeholder; edit the wrapper's `DATA_DIR` (in `/opt/gate/run-analysis`) to the actual data directory. Then, as the data-owning user, run the profiler over it.
+The bridge wrapper hard-codes the data path so the brain cannot influence it. Provisioning bakes that path in at install time from the `DATA_DIR` parameter to `provision.sh`, so set it correctly when provisioning; do not hand-edit the root-owned wrapper afterwards. Then, as the data-owning user, run the profiler over the data into a private staging directory that the brain user cannot enter. Never build directly into `/var/gate/dict`: the brain's workspace links there, so a direct build is visible to the brain before anyone has audited it.
 
 ```bash
-sudo -u cs-exec /opt/gated-cs/bin/build-dictionary /path/to/data --out /var/gate/dict
+S=/var/gate/dict-staging; rm -rf "$S"; install -d -o cs-exec -g cs-exec -m 0700 "$S"
+sudo -u cs-exec /opt/gated-cs/bin/build-dictionary /path/to/data --out "$S"
 ```
 
 This step reads the raw data, and it is the one point in the build where a defect can tempt an operator to inspect raw values directly. An agent following this guide must not run the profiler or any data-touching command itself and must not open the raw files, because a raw value can reach a model's context through a stack trace or a printed row; instead, the agent instructs the human operator to run the profiling and audit commands as the data-owning user and to relay back only the non-disclosive outputs, namely the dictionary, the row and column counts, and the leak-audit findings. When the profiler fails on a dataset-specific edge case, the fix is developed from the column name, the error type, and the audit finding the operator reports, not from raw data placed in the model's context. This keeps the guarantee that no model reads a raw record intact through the construction of the dictionary, exactly as it holds when the live agent runs.
 
-The profiler emits `dictionary.json`, `dictionary.md`, and `synthetic_samples/`. Audit the dictionary before it is delivered to the brain: confirm it contains no raw minimum or maximum keys, no known participant identifier, and no leaked dates, identifiers, or email addresses, and that identifier and date columns are flagged sensitive with their values suppressed. Real data commonly surfaces parsing edge cases; the reference deployment required handling non-finite numeric values, a header column whose name began with the comment character, and date columns that needed Safe-Harbor suppression. Treat any anomaly the audit reports as a defect to fix, not to wave through.
+The profiler emits `dictionary.json`, `dictionary.md`, and `synthetic_samples/`. Audit the dictionary in the staging directory, before it is delivered to the brain: confirm it contains no raw minimum or maximum keys, no known participant identifier, and no leaked dates, identifiers, or email addresses, and that identifier and date columns are flagged sensitive with their values suppressed. Real data commonly surfaces parsing edge cases; the reference deployment required handling non-finite numeric values, a header column whose name began with the comment character, and date columns that needed Safe-Harbor suppression. Treat any anomaly the audit reports as a defect to fix, not to wave through.
 
-Generate the relational synthetic surface from the audited dictionary, which reads only the dictionary and never the raw data, and deliver both to the brain's readable location.
+Generate the relational synthetic surface from the audited dictionary, which reads only the dictionary and never the raw data, still inside the staging directory. Once both pass the audit, publish them to the brain's readable location: back up any existing `/var/gate/dict`, remove `reid_report.json` from staging, move the staging directory to `/var/gate/dict`, and set it to `cs-exec:csbridge` with directories 750 and files 640.
 
 ```bash
-sudo -u cs-exec /opt/gated-cs/bin/build-synthetic --dictionary /var/gate/dict/dictionary.json --out /var/gate/dict --id-pool-size 50
+sudo -u cs-exec /opt/gated-cs/bin/build-synthetic --dictionary "$S/dictionary.json" --out "$S" --id-pool-size 50
+# after the audit passes:
+test -e /var/gate/dict && mv /var/gate/dict /root/var-gate-dict.bak-$(date -u +%Y%m%dT%H%M%SZ)
+rm -f "$S/reid_report.json"; mv "$S" /var/gate/dict
+chown -R cs-exec:csbridge /var/gate/dict
+find /var/gate/dict -type d -exec chmod 750 {} +; find /var/gate/dict -type f -exec chmod 640 {} +
 ```
 
 Confirm that a cross-table join over two synthetic files on the join key returns a non-empty result, that date columns hold fabricated dates and numeric columns hold numbers, and that no real value appears in any synthetic file.
