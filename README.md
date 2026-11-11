@@ -116,7 +116,13 @@ Run all of these. Each line states the expected result.
 ssh -i "$KEY" root@"$VM" 'bash -s' <<'EOF'
 set -u
 g() { sudo -u cs-gated bash -c "$1" >/dev/null 2>&1 && echo "ALLOWED" || echo "DENIED"; }
-echo "raw data dir        : $(g "ls '$(grep -m1 ^DATA_DIR= /opt/gate/run-analysis | cut -d= -f2)'")   (expect DENIED)"
+# the wrapper line carries an inline comment: take only the path token after "DATA_DIR="
+D=$(awk '/^DATA_DIR=/{sub(/^DATA_DIR=/, ""); print $1; exit}' /opt/gate/run-analysis)
+if [ -d "$D" ]; then
+  echo "raw data dir        : $(g "ls '$D'")   (expect DENIED)   [$D]"
+else
+  echo "raw data dir        : MISSING [$D]   (FAIL: provision should have created it; stop and report)"
+fi
 echo "audit log           : $(g 'cat /var/gate/audit.jsonl')   (expect DENIED)"
 echo "quarantine queue    : $(g 'ls /var/gate/queue')   (expect DENIED)"
 echo "derived store       : $(g 'ls /var/gate/derived')   (expect DENIED)"
@@ -145,20 +151,24 @@ cat > "$W/adversarial.py" <<'PY'
 import os, socket
 try: open("/var/gate/audit.jsonl", "a").write("TAMPER\n")
 except Exception: pass
-try: socket.create_connection(("1.1.1.1", 443), timeout=2)
-except Exception: pass
-open(f"{os.environ['OUTPUT_DIR']}/smoke__adv.csv", "w").write("k,n\nx,100\n")
+try:
+    socket.create_connection(("1.1.1.1", 443), timeout=2).close(); net = "net_OPEN"
+except Exception:
+    net = "net_blocked"
+open(f"{os.environ['OUTPUT_DIR']}/smoke__adv.csv", "w").write(f"k,n\n{net},100\n")
 PY
 chown cs-gated:cs-gated "$W"/*.py
 cd "$W"
 for s in clean dump adversarial; do echo "== $s"; sudo -u cs-gated submit-analysis "$s.py" 2>&1 | tail -3; done
 echo "TAMPER lines in audit: $(grep -c TAMPER /var/gate/audit.jsonl)"
-rm -rf "$W"
+echo "network result      : $(cat /var/gate/results/*smoke__adv.csv 2>/dev/null | grep -o 'net_[A-Za-z]*' || echo 'NO RESULT (adversarial not released; investigate)')"
+rm -rf "$W"; rm -f /var/gate/results/*smoke__*
 EOF
 ```
 
-Expected: `clean` released, `dump` quarantined (row count exceeds cap 20), `adversarial` produces no
-tamper and no connection (`TAMPER lines in audit: 0`). The sandbox binds `DATA_DIR` with
+Expected: `clean` released, `dump` quarantined (row count exceeds cap 20), `adversarial` released with
+`TAMPER lines in audit: 0` **and** `network result: net_blocked`. Report network isolation as verified
+only if you saw `net_blocked`; `net_OPEN` or no result is a failure to stop on. The sandbox binds `DATA_DIR` with
 `--ro-bind-try`, so this works before any data is attached.
 
 ## 4. Transfer an existing synthetic dataset from another VM (agent, optional)
@@ -248,13 +258,21 @@ Then **either**:
   cd <DATA_DIR> && find . -type f -print0 | sort -z | xargs -0 md5sum | md5sum
   ```
   Same hash: done. Different hash: the transferred dictionary does not describe this data; do (b).
-- **(b) New or changed dataset:** build and audit the dictionary as `cs-exec`:
+- **(b) New or changed dataset:** build into a private staging dir that `cs-gated` cannot enter (the
+  analyst workspace links straight into `/var/gate/dict`, so never build there directly), audit, then
+  publish:
   ```bash
-  sudo -u cs-exec /opt/gated-cs/bin/build-dictionary <DATA_DIR> --out /var/gate/dict
-  sudo -u cs-exec /opt/gated-cs/bin/build-synthetic --dictionary /var/gate/dict/dictionary.json --out /var/gate/dict
+  S=/var/gate/dict-staging; rm -rf "$S"; install -d -o cs-exec -g cs-exec -m 0700 "$S"
+  sudo -u cs-exec /opt/gated-cs/bin/build-dictionary <DATA_DIR> --out "$S"
+  sudo -u cs-exec /opt/gated-cs/bin/build-synthetic --dictionary "$S/dictionary.json" --out "$S"
+  # AUDIT $S/dictionary.md and $S/synthetic_samples by eye now (criteria below). Publish only if clean:
+  test -e /var/gate/dict && mv /var/gate/dict /root/var-gate-dict.bak-$(date -u +%Y%m%dT%H%M%SZ)
+  rm -f "$S/reid_report.json"; mv "$S" /var/gate/dict
+  chown -R cs-exec:csbridge /var/gate/dict
+  find /var/gate/dict -type d -exec chmod 750 {} +; find /var/gate/dict -type f -exec chmod 640 {} +
   ```
-  Read `dictionary.md` by eye before the analyst uses it: no raw min/max, no participant IDs, no dates,
-  emails, or free-text values; ID and date columns flagged sensitive. Supported inputs: CSV, TSV
+  Audit criteria: no raw min/max, no participant IDs, no dates, emails, or free-text values; ID and
+  date columns flagged sensitive; no real value in any synthetic file. Supported inputs: CSV, TSV
   (leading `#` metadata lines are handled), and Parquet (nested list/struct columns must be flattened
   first). Profiling needs a recognized subject-key column name; `--join-keys` applies to
   `build-synthetic` only. If the profiler fails, relay only the error type and column name to the agent,
@@ -272,7 +290,7 @@ Report each item as **verified**, **not done (why)**, or **waiting on human**:
 - Target VM IP and hostname, `LABEL`, baked `DATA_DIR`, `MIRROR_DIR`.
 - Provision completed; bwrap version.
 - Isolation matrix from step 3 (each line with its actual result).
-- Gate smoke test verdicts (clean / dump / adversarial, TAMPER count).
+- Gate smoke test verdicts (clean / dump / adversarial, TAMPER count, network result).
 - Synthetic transfer: source IP, dictionary build date, synthetic file count on both sides, perms applied,
   `reid_report.json` excluded.
 - Claude Code version for `cs-gated`; skills deployed (list).
@@ -295,5 +313,5 @@ Report each item as **verified**, **not done (why)**, or **waiting on human**:
 | `docs/wiki/` | Design write-up and prose setup guide |
 | `docs/solutions/` | Documented fixes and gotchas |
 
-Development: `uv sync && uv run pytest`. Keep test venvs inside the repo, not under `/tmp`: the gate
+Development: `uv sync --extra dev && uv run pytest`. Keep test venvs inside the repo, not under `/tmp`: the gate
 sandbox masks `/tmp`, which causes spurious failures.
