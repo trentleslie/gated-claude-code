@@ -18,12 +18,12 @@ flowchart LR
 Before starting, fix these values; the reference deployment's values are shown for orientation.
 
 | Parameter | Reference value | What it controls |
-|---|---|---|
+|-----------|-----------------|------------------|
 | Data directory | `/procedure/data/local_data/ARIVALE_SNAPSHOTS_2025` | Where the raw tabular files live on the VM |
 | File format | tab-delimited, 13 leading `#` metadata lines, header on line 14 | How the profiler and analysis scripts parse the tables |
 | Join key column | `public_client_id` | The shared key that makes synthetic cross-table joins work |
 | Gate thresholds | k = 5, row cap = 20, cardinality cap = 50 | Minimum cell size, row-dump block, categorical vocabulary cap |
-| OS users | `cs-exec` (data + gate), `cs-gated` (brain) | The isolation boundary |
+| OS users  | `cs-exec` (data + gate), `cs-gated` (brain) | The isolation boundary |
 
 The profiler auto-detects the delimiter and captures `#`-prefixed metadata, so most CSV/TSV snapshots work without code changes; confirm the leading-metadata-line count and the join-key name against your data.
 
@@ -122,15 +122,29 @@ The mirror is a small service that watches the workspace with `inotify` and re-s
 rsync -a --delete /home/cs-gated/analysis/ /procedure/claude-analysis/
 ```
 
+## Local figure rendering for the agent (optional)
+
+Give the unprivileged agent a minimal plotting stack so it draws and checks its own figures before an operator opens JupyterLab. Install matplotlib and pandas into the brain user's own site, not the system interpreter, so the packages travel with that account and touch nothing privileged.
+
+```bash
+# as root, install into the brain user's --user site
+sudo -u cs-gated python3 -m pip install --user matplotlib pandas
+```
+
+The agent reads the aggregates it has already released through the gate and renders them headlessly (`matplotlib.use("Agg")`), then inspects the resulting PNGs and revises the figure code without a human in the loop. The install grants no additional reach: the boundary is enforced by filesystem ownership, so a plotting call against a raw table fails with the same permission error a read would. Confirm this after installing — the brain user must still be denied when it opens a raw file, and it may plot only the released aggregates.
+
+A managed JupyterLab kernel runs in its own interpreter, distinct from the brain user's; the analysis and figure libraries an operator's notebook imports must be installed into that kernel's environment, not the system interpreter, or a notebook that runs cleanly for the agent will fail to import them in JupyterLab.
+
 ## Verification checklist
 
-- The brain user is denied read access to the raw data, and reading it returns permission-denied.
-- The brain user can read the dictionary, the synthetic samples, and the results directory, but not the audit log or the quarantine queue.
-- A clean aggregate submitted through the bridge is released and delivered to the results directory.
-- A row-level dump is quarantined; a group with fewer than five members is suppressed; a submitted script that attempts to open the audit log or a network socket produces neither tampering nor a connection.
-- Every submission appears in the append-only audit log with its script hash and verdict.
-- A derivation submitted through `submit-derivation` persists a layer the brain user cannot read, releases only its fit-quality aggregate, and appears in the dictionary tagged `derived`; a later analysis can read that layer and join it to a raw table.
-- If the JupyterLab mirror is enabled, a newly written script appears under the mirror directory within seconds, and a file written on the JupyterLab side does not propagate back into the brain's workspace.
+* The brain user is denied read access to the raw data, and reading it returns permission-denied.
+* The brain user can read the dictionary, the synthetic samples, and the results directory, but not the audit log or the quarantine queue.
+* A clean aggregate submitted through the bridge is released and delivered to the results directory.
+* A row-level dump is quarantined; a group with fewer than five members is suppressed; a submitted script that attempts to open the audit log or a network socket produces neither tampering nor a connection.
+* Every submission appears in the append-only audit log with its script hash and verdict.
+* A derivation submitted through `submit-derivation` persists a layer the brain user cannot read, releases only its fit-quality aggregate, and appears in the dictionary tagged `derived`; a later analysis can read that layer and join it to a raw table.
+* If the JupyterLab mirror is enabled, a newly written script appears under the mirror directory within seconds, and a file written on the JupyterLab side does not propagate back into the brain's workspace.
+* If local figure rendering is enabled, the brain user can import matplotlib and pandas and save a figure from a released aggregate, yet still receives permission-denied when it opens a raw table.
 
 ## Operating the analyst
 
