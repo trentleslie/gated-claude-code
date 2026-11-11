@@ -156,6 +156,6 @@ find /var/gate/dict -type d -exec chmod 750 {} +; find /var/gate/dict -type f -e
   "audit the dictionary before disclosure"; staging-then-publish is its operational form.
 - [`install-deploy-venv-from-uv-lock-2026-10-26.md`](install-deploy-venv-from-uv-lock-2026-10-26.md): `uv`
   lock and dev-extra context.
-- Still stale as of this writing: `provision/RUNBOOK.md` (Phase 2 step 4 builds directly into
-  `/var/gate/dict`) and `docs/wiki/gated-analysis-setup-guide.outline.md` (direct build; tells operators to
-  hand-edit `DATA_DIR` in the wrapper, which `provision.sh` now bakes at install).
+- Updated alongside this learning (PR #24): `provision/RUNBOOK.md` and
+  `docs/wiki/gated-analysis-setup-guide.outline.md` now use staging, audit, then publish. The wiki also
+  explains that `provision.sh` bakes `DATA_DIR` into the wrappers at install time.
