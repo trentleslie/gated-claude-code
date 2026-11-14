@@ -49,3 +49,12 @@ def test_scan_fails_on_unreadable_sample_directory(tmp_path):
     finally:
         locked.chmod(0o700)
     assert found == {str(locked): ["synthetic_samples/old (unreadable directory, cannot be checked)"]}
+
+def test_scan_fails_on_symlinked_sample_directory(tmp_path):
+    from gated_cs.profiler.build_dictionary import _scan_samples
+    elsewhere = tmp_path/"elsewhere"; elsewhere.mkdir()
+    (elsewhere/"stale.csv").write_text("a\n3f2504e0-4f89-41d3-9a0c-0305e82c3301\n")
+    ss = tmp_path/"synthetic_samples"; ss.mkdir()
+    (ss/"old").symlink_to(elsewhere, target_is_directory=True)
+    assert _scan_samples(str(tmp_path)) == {
+        str(ss/"old"): ["synthetic_samples/old (symlinked directory, cannot be checked)"]}

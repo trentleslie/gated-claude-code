@@ -37,12 +37,14 @@ def _text_findings(text, label):
     return [f"{label} line {i}" for i, line in enumerate(text.splitlines(), 1)
             if UUID_TOKEN.search(line)]
 
+def _frame_findings(df, label):
+    return [f"{label} column {i}" for i, c in enumerate(df.columns)
+            if contains_uuid(c) or uuid_mask(df[c]).any()]
+
 def _sample_findings(path, label):
     try:
         if is_parquet(path):
-            df = pd.read_parquet(path)
-            return [f"{label} column {i}" for i, c in enumerate(df.columns)
-                    if contains_uuid(c) or uuid_mask(df[c]).any()]
+            return _frame_findings(pd.read_parquet(path), label)
         with open(path, "rb") as f:
             return _text_findings(f.read().decode("utf-8", "ignore"), label)
     except Exception:
@@ -56,7 +58,12 @@ def _scan_samples(out_dir):
         # subtree must fail the build, exactly as an unreadable file does
         where = err.filename or ss
         found[where] = [f"{_redact(os.path.relpath(where, out_dir))} (unreadable directory, cannot be checked)"]
-    for root, _, names in os.walk(ss, onerror=_unreadable):
+    for root, dirs, names in os.walk(ss, onerror=_unreadable):
+        for dn in dirs:
+            # os.walk lists a symlinked directory but never descends into it
+            full = os.path.join(root, dn)
+            if os.path.islink(full):
+                found[full] = [f"{_redact(os.path.relpath(full, out_dir))} (symlinked directory, cannot be checked)"]
         for fn in names:
             full = os.path.join(root, fn)
             hits = _sample_findings(full, _redact(os.path.relpath(full, out_dir)))
@@ -64,7 +71,7 @@ def _scan_samples(out_dir):
                 found[full] = hits
     return found
 
-def _fail_closed(findings, remove, removed=True):
+def _fail_closed(findings, remove):
     # Fail-closed pre-release check: nothing this run wrote stays readable, and the message
     # names each file and field (never the value) so the operator can fix the source.
     for p in remove:
@@ -74,7 +81,7 @@ def _fail_closed(findings, remove, removed=True):
             pass
     shown = "; ".join(findings[:20]) + (f"; ...and {len(findings) - 20} more" if len(findings) > 20 else "")
     what = ("UUID-shaped value found in published output; this run's artifacts were removed. "
-            if removed else
+            if remove else
             "UUID-shaped value would reach published output; nothing was written. ")
     raise PublishedUUIDError(f"{what}Fix or exclude the source, then rebuild. Found in: {shown}")
 
@@ -274,14 +281,15 @@ def add_layer_to_dictionary(dict_path, out_dir, name, df, thresholds=DEFAULTS,
     # Same fail-closed checks as build(), run BEFORE anything is written: a derived layer's
     # name and column names (e.g. a pivot keyed on staff UUIDs) are copied verbatim into
     # both dictionary files and the sample header, so nothing is published on a finding.
-    findings = _dictionary_findings({k: v for k, v in d.items() if k != "sources"})
+    # The JSON is serialized first too, so a value json cannot encode raises here rather
+    # than after dictionary.json has been truncated.
+    text = json.dumps(d, indent=2)
+    findings = _dictionary_findings({k: v for k, v in json.loads(text).items() if k != "sources"})
     findings += _text_findings(md, "dictionary.md")
-    label = _redact(os.path.join("synthetic_samples", sample))
-    findings += [f"{label} column {i}" for i, c in enumerate(synth.columns)
-                 if contains_uuid(c) or uuid_mask(synth[c]).any()]
+    findings += _frame_findings(synth, _redact(os.path.join("synthetic_samples", sample)))
     if findings:
-        _fail_closed(findings, [], removed=False)
-    with open(dict_path, "w") as f: json.dump(d, f, indent=2)
+        _fail_closed(findings, [])
+    with open(dict_path, "w") as f: f.write(text)
     with open(os.path.join(os.path.dirname(dict_path), "dictionary.md"), "w") as f:
         f.write(md)
     ss = os.path.join(out_dir, "synthetic_samples"); os.makedirs(ss, exist_ok=True)
