@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 import pandas as pd
 from ..config import DEFAULTS
-from ..profiler.sensitivity import is_sensitive, contains_uuid
+from ..profiler.sensitivity import is_sensitive, contains_uuid, uuid_mask
 _ID = re.compile(r"(email|mrn|ssn|dob|birth|name|address|zip|phone|geo|_id$|^id$)", re.I)
 
 @dataclass
@@ -104,7 +104,7 @@ def _uuid_verdict(df):
             if contains_uuid(c):
                 return Verdict("block", f"UUID-shaped column name (column {i}), "
                                         "human review required")
-            if df[c].map(contains_uuid).any():
+            if uuid_mask(df[c]).any():
                 return Verdict("block", f"UUID-shaped value(s) in column {i}, "
                                         "human review required")
     except Exception:

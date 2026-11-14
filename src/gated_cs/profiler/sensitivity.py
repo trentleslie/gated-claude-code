@@ -39,6 +39,13 @@ def contains_uuid(value):
         return False
     return bool(UUID_TOKEN.search(uuid_text(value)))
 
+def uuid_mask(series):
+    """Per-value contains_uuid as a plain boolean Series. Cast to object first: Series.map
+    on a categorical column returns a Categorical whenever the mapping is one-to-one (a
+    single-category column, or one UUID and one non-UUID category), and a Categorical
+    supports neither any() nor mean()."""
+    return series.astype(object).map(contains_uuid).astype(bool)
+
 def is_sensitive(name, series, thresholds=DEFAULTS):
     if _NAME.search(name or ""):
         return True
@@ -57,6 +64,6 @@ def is_sensitive(name, series, thresholds=DEFAULTS):
             return True
         # mostly UUID-valued (same bar and sampling as the date rule). Tested on the raw
         # values, not their str() form, so binary UUIDs are recognised.
-        if len(raw) and raw.head(200).map(contains_uuid).mean() >= 0.6:
+        if len(raw) and uuid_mask(raw.head(200)).mean() >= 0.6:
             return True
     return False

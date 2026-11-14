@@ -81,3 +81,25 @@ def test_minority_uuid_column_not_flagged_by_column_rule():
     # profile_column (not this rule) is what keeps those UUIDs unpublished.
     s = pd.Series(_UUIDS * 4 + ["unassigned"] * 60)
     assert not is_sensitive("coach", s)
+
+
+@pytest.mark.parametrize("values, expected", [
+    (["north"] * 30, False),                       # single category
+    (["unassigned"] * 20 + [_UUIDS[0]] * 10, False),   # one UUID + one non-UUID category
+    ([_UUIDS[0]] * 10, True),                      # single UUID category
+])
+def test_categorical_columns_do_not_crash_the_uuid_rule(values, expected):
+    # Series.map on a categorical returns a Categorical when the mapping is one-to-one,
+    # which has no mean()/any(); a constant category column in a parquet file hit that.
+    s = pd.Series(values, dtype="category")
+    assert is_sensitive("grp", s) is expected
+    assert profile_column(s, name="grp")["sensitive"] is expected
+
+
+def test_scan_reads_single_category_parquet_sample(tmp_path):
+    from gated_cs.profiler.build_dictionary import _sample_findings
+    p = tmp_path / "s.parquet"
+    pd.DataFrame({"site": pd.Series(["north"] * 5, dtype="category")}).to_parquet(p)
+    assert _sample_findings(str(p), "s.parquet") == []
+    pd.DataFrame({"site": pd.Series([_UUIDS[0]] * 5, dtype="category")}).to_parquet(p)
+    assert _sample_findings(str(p), "s.parquet") == ["s.parquet column 0"]

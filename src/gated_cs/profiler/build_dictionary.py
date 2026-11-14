@@ -5,7 +5,7 @@ from .parse import read_table, is_parquet
 from .synthesize import synthesize
 from .discover import discover_files
 from .subject_key import detect_subject_key
-from .sensitivity import UUID_TOKEN, as_text, contains_uuid
+from .sensitivity import UUID_TOKEN, as_text, contains_uuid, uuid_mask
 from ..config import DEFAULTS
 
 class PublishedUUIDError(RuntimeError):
@@ -42,7 +42,7 @@ def _sample_findings(path, label):
         if is_parquet(path):
             df = pd.read_parquet(path)
             return [f"{label} column {i}" for i, c in enumerate(df.columns)
-                    if contains_uuid(c) or df[c].map(contains_uuid).any()]
+                    if contains_uuid(c) or uuid_mask(df[c]).any()]
         with open(path, "rb") as f:
             return _text_findings(f.read().decode("utf-8", "ignore"), label)
     except Exception:
