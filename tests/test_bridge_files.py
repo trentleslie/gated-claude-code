@@ -11,12 +11,44 @@ def test_run_analysis_wrapper_pins_trusted_paths():
     # sandbox now lives inside run_analysis, around only the child script; this
     # wrapper's job is to pin the trusted paths so cs-gated cannot override them.
     assert "bwrap" not in txt
-    assert "DATA_DIR=/data/arivale" in txt
-    assert ":=" not in txt  # not overridable via env
+    # the data path is a placeholder that provision.sh bakes in at install; the wrapper must
+    # never take it from the environment or its arguments. Exactly one assignment, and it is
+    # the placeholder (not "$1", "${DATA_DIR:-...}" or any other expansion).
+    assigns = [l.split("#")[0].strip() for l in txt.splitlines() if l.lstrip().startswith("DATA_DIR=")]
+    assert assigns == ["DATA_DIR=__GATED_CS_DATA_DIR__"]
+    assert ":=" not in txt and ":-" not in txt  # not overridable via env
+    prov = (P / "provision.sh").read_text()
+    assert 's#__GATED_CS_DATA_DIR__#${DATA_DIR}#g' in prov         # substituted at install
+    assert 'grep -q "^DATA_DIR=${DATA_DIR}\\b" /opt/gate/run-analysis' in prov   # and verified
     assert "--audit /var/gate/audit.jsonl" in txt
     assert "--queue" in txt
     assert "--results /var/gate/results" in txt
     assert "run-analysis" in txt
+
+def _audit_log_setup_lines():
+    return [l for l in (P / "provision.sh").read_text().splitlines() if "/var/gate/audit.jsonl" in l]
+
+def test_provision_never_truncates_the_audit_log():
+    lines = _audit_log_setup_lines()
+    assert not any(">" in l.split("#")[0] for l in lines)      # no redirection onto the log
+    assert any(l.split("#")[0].strip() == "touch /var/gate/audit.jsonl" for l in lines)  # create if absent
+    joined = "\n".join(lines)
+    assert "chown cs-exec:cs-exec /var/gate/audit.jsonl" in joined   # still enforced every run
+    assert "chmod 0600 /var/gate/audit.jsonl" in joined
+
+def test_reprovisioning_keeps_existing_audit_entries(tmp_path):
+    # run provision.sh's own audit-log creation step twice against a log with history
+    import subprocess
+    log = tmp_path / "audit.jsonl"
+    create = [l for l in _audit_log_setup_lines() if "chown" not in l and "chmod" not in l]
+    assert create, "provision.sh no longer creates the audit log"
+    script = "\n".join(create).replace("/var/gate/audit.jsonl", str(log))
+    subprocess.run(["bash", "-euc", script], check=True)       # absent -> created
+    assert log.exists()
+    log.write_text('{"verdict": "allow"}\n')
+    for _ in range(2):
+        subprocess.run(["bash", "-euc", script], check=True)
+    assert log.read_text() == '{"verdict": "allow"}\n'
 
 def test_wrapper_derives_session_from_audit_login_with_failsafe_fallback():
     # the differencing-monitor boundary must come from a trusted, unforgeable source and be

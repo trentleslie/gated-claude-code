@@ -63,7 +63,7 @@ def test_exemplar_impute_produces_layer_and_finite_quality(tmp_path):
     import pandas as pd
 
     quality = pd.read_csv(quality_files[0])
-    cv_r2 = float(quality.loc[quality["metric"] == "cv_r2", "value"].iloc[0])
+    cv_r2 = float(quality.loc[quality["metric"] == "cv_r2_pooled", "value"].iloc[0])
     assert math.isfinite(cv_r2)
 
     layer = pd.read_csv(layer_file, sep="\t", compression="gzip")
