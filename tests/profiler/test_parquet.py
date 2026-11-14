@@ -155,3 +155,56 @@ def test_csv_profiling_works_without_pyarrow(tmp_path):
                        env={**os.environ, "PYTHONPATH": "src"})
     assert r.returncode == 0, r.stderr[-500:]
     assert (tmp_path / "out" / "synthetic_samples" / "d.csv").exists()
+
+
+# --- native binary UUID columns (pre-rebuild hardening R4) ---
+import glob, uuid
+import pyarrow as pa, pyarrow.parquet as pq
+from gated_cs.profiler.sensitivity import UUID_TOKEN
+
+_BIN = [uuid.UUID(int=(0xFACE << 104) + i * 0x1000000000000001 + 5) for i in range(10)]
+
+
+def _binary_dir(tmp_path, values, typ):
+    base = tmp_path / "data"
+    (base / "crm").mkdir(parents=True)
+    n = len(values)
+    pq.write_table(pa.table({"public_client_id": [f"C{i:04d}" for i in range(n)],
+                             "coach": pa.array(values, type=typ),
+                             "tier": ["gold", "silver"] * (n // 2)}),
+                   base / "crm" / "clients.parquet")
+    return str(base)
+
+
+def _published(out):
+    blob = open(os.path.join(out, "dictionary.json")).read() + open(os.path.join(out, "dictionary.md")).read()
+    for p in glob.glob(os.path.join(out, "synthetic_samples", "**", "*.parquet"), recursive=True):
+        df = pd.read_parquet(p)
+        blob += " ".join(map(repr, df.columns)) + "".join(repr(v) for c in df.columns for v in df[c])
+    return blob
+
+
+def _assert_no_binary_uuid(blob):
+    assert not UUID_TOKEN.search(blob)
+    for u in _BIN:
+        assert str(u) not in blob and u.hex not in blob
+        assert repr(u.bytes)[2:-1] not in blob          # byte-repr form
+
+
+def test_fixed_length_binary_uuid_column_never_published(tmp_path):
+    out = str(tmp_path / "out")
+    d = build(_binary_dir(tmp_path, [u.bytes for u in _BIN] * 10, pa.binary(16)), out_dir=out)
+    _assert_no_binary_uuid(_published(out))
+    coach = d["files"][os.path.join("crm", "clients.parquet")]["columns"]["coach"]
+    assert coach["sensitive"] is True and coach["categories"] is None
+
+
+def test_minority_binary_uuids_withheld_per_value(tmp_path):
+    values = ([b"unassigned"] * 3 + [u.bytes for u in _BIN[:2]]) * 10 \
+        + ([b"unassigned"] * 3 + [u.bytes for u in _BIN[2:4]]) * 10
+    out = str(tmp_path / "out")
+    d = build(_binary_dir(tmp_path, values, pa.binary()), out_dir=out)
+    _assert_no_binary_uuid(_published(out))
+    coach = d["files"][os.path.join("crm", "clients.parquet")]["columns"]["coach"]
+    assert coach["categories"] == ["unassigned"]
+    assert coach["uuid_categories_withheld"] == 4

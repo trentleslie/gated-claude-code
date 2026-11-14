@@ -86,3 +86,34 @@ def test_hash_prefixed_column_name_is_not_comment_stripped(tmp_path):
                  "c1\totuA\t7\nc2\totuB\t9\nc3\totuA\t4\n")
     out = profile_file(str(p))
     assert set(out["columns"]) == {"client", "#OTUs", "count"}   # all 3 kept, none comment-stripped
+
+
+# --- UUID-shaped categories are withheld per value (pre-rebuild hardening R1) ---
+import uuid
+_UU = [str(uuid.UUID(int=(0xBEEF << 100) + i * 0x100000000000001 + 9)) for i in range(8)]
+
+def test_ordinary_categories_carry_no_withheld_key():
+    out = profile_column(pd.Series(["A", "B", "C"] * 40), name="arm")
+    assert set(out["categories"]) == {"A", "B", "C"}
+    assert "uuid_categories_withheld" not in out
+
+def test_only_k_passing_values_are_uuids_gives_empty_categories_and_synthesizes():
+    from gated_cs.profiler.synthesize import synthesize
+    # 40% UUIDs (8 values x 5 rows, each meets k) + 60 rows of 20 rare placeholders (3 rows each)
+    s = pd.Series([v for i in range(5) for v in _UU] + [f"note{i % 20}" for i in range(60)])
+    out = profile_column(s, name="coach")
+    assert out["sensitive"] is False
+    assert out["categories"] == []
+    assert out["uuid_categories_withheld"] == 8
+    assert out["rare_categories_suppressed"] == 20
+    synth = synthesize({"columns": {"coach": out}}, n_rows=25, seed=0)
+    assert len(synth["coach"]) == 25
+    assert not any(u in str(v) for v in synth["coach"] for u in _UU)
+
+def test_rare_uuid_values_count_as_rare_not_withheld():
+    # a UUID below k was never going to be published; it is counted once, as rare
+    s = pd.Series(["A"] * 50 + ["B"] * 46 + [_UU[0]] * 4)
+    out = profile_column(s, name="coach")
+    assert out["categories"] == ["A", "B"]
+    assert out["rare_categories_suppressed"] == 1
+    assert "uuid_categories_withheld" not in out

@@ -5,7 +5,72 @@ from .parse import read_table, is_parquet
 from .synthesize import synthesize
 from .discover import discover_files
 from .subject_key import detect_subject_key
+from .sensitivity import UUID_TOKEN, as_text, contains_uuid
 from ..config import DEFAULTS
+
+class PublishedUUIDError(RuntimeError):
+    """A UUID-shaped value reached (or would reach) a published artifact."""
+
+def _redact(text):
+    return UUID_TOKEN.sub("<uuid>", str(text))
+
+def _dictionary_findings(node, path="dictionary.json"):
+    # every string a dictionary publishes, keys included: category values are filtered in
+    # profile_column, but comment lines, descriptions, column names and file paths are
+    # copied from the source verbatim. Locations are redacted so the error names the field
+    # without repeating the value.
+    out = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            here = f"{path}[{_redact(k)!r}]"
+            if contains_uuid(k):
+                out.append(here + " (name)")
+            out += _dictionary_findings(v, here)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            out += _dictionary_findings(v, f"{path}[{i}]")
+    elif isinstance(node, str) and contains_uuid(node):
+        out.append(path)
+    return out
+
+def _text_findings(text, label):
+    return [f"{label} line {i}" for i, line in enumerate(text.splitlines(), 1)
+            if UUID_TOKEN.search(line)]
+
+def _sample_findings(path, label):
+    try:
+        if is_parquet(path):
+            df = pd.read_parquet(path)
+            return [f"{label} column {i}" for i, c in enumerate(df.columns)
+                    if contains_uuid(c) or df[c].map(contains_uuid).any()]
+        with open(path, "rb") as f:
+            return _text_findings(f.read().decode("utf-8", "ignore"), label)
+    except Exception:
+        return [f"{label} (unreadable, cannot be checked)"]
+
+def _scan_samples(out_dir):
+    # {path: findings} for every file under synthetic_samples, stale ones included
+    ss, found = os.path.join(out_dir, "synthetic_samples"), {}
+    for root, _, names in os.walk(ss):
+        for fn in names:
+            full = os.path.join(root, fn)
+            hits = _sample_findings(full, _redact(os.path.relpath(full, out_dir)))
+            if hits:
+                found[full] = hits
+    return found
+
+def _fail_closed(findings, remove):
+    # Fail-closed pre-release check: nothing this run wrote stays readable, and the message
+    # names each file and field (never the value) so the operator can fix the source.
+    for p in remove:
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    shown = "; ".join(findings[:20]) + (f"; ...and {len(findings) - 20} more" if len(findings) > 20 else "")
+    raise PublishedUUIDError(
+        "UUID-shaped value found in published output; this run's artifacts were removed. "
+        f"Fix or exclude the source, then rebuild. Found in: {shown}")
 
 def _sha256(path, buf=1 << 20):
     h = hashlib.sha256()
@@ -34,10 +99,15 @@ def _codebook_text(path, cap=1000):
     parsed, df = read_table(path)
     out = {}
     for name in parsed.header:
-        vals = sorted(str(v) for v in df[name].dropna().unique())
+        every = sorted(as_text(df[name].dropna()).unique())
+        # this path bypasses profile_column, so it applies the same per-value UUID filter
+        vals = [v for v in every if not contains_uuid(v)]
+        n_uuid = len(every) - len(vals)
         if len(vals) > cap:
             extra = len(vals) - cap
             vals = vals[:cap] + [f"…({extra} more)"]
+        if n_uuid:
+            vals.append(f"…({n_uuid} UUID-shaped withheld)")
         out[name] = vals
     return out
 
@@ -85,7 +155,7 @@ def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
     os.makedirs(os.path.join(out_dir, "synthetic_samples"), exist_ok=True)
     id_pool = [f"SYNTH_{i:04d}" for i in range(id_pool_size)]
 
-    files, sources, manifest_files = {}, {}, {}
+    files, sources, manifest_files, written = {}, {}, {}, []
     for df_ in discover_files(data_dir):
         size = os.path.getsize(df_.path)
         prof = profile_file(df_.path, thresholds)
@@ -108,13 +178,28 @@ def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
         if not is_codebook:
             synth = synthesize(prof, n_rows=100, seed=0,
                                join_keys=(jk,) if jk else (), id_pool=id_pool)
-            _write_synthetic(synth, os.path.join(out_dir, "synthetic_samples", df_.relpath), prof)
+            dest = os.path.join(out_dir, "synthetic_samples", df_.relpath)
+            _write_synthetic(synth, dest, prof)
+            written.append(dest)
 
     dictionary = {"data_dir": data_dir, "sources": sources, "files": files}
-    with open(os.path.join(out_dir, "dictionary.json"), "w") as f:
+    dict_path, md_path = os.path.join(out_dir, "dictionary.json"), os.path.join(out_dir, "dictionary.md")
+    with open(dict_path, "w") as f:
         json.dump(dictionary, f, indent=2, default=str)
-    with open(os.path.join(out_dir, "dictionary.md"), "w") as f:
+    with open(md_path, "w") as f:
         f.write(_render_md(dictionary))
+    # Fail-closed scan of what was just published (read back from disk). The run manifest is
+    # not scanned: it holds input hashes and package versions, not data values.
+    with open(dict_path) as f:
+        on_disk = json.load(f)
+    findings = _dictionary_findings({k: v for k, v in on_disk.items() if k != "sources"})
+    findings += _dictionary_findings({"sources": dict.fromkeys(on_disk.get("sources", {}))})
+    with open(md_path) as f:
+        findings += _text_findings(f.read(), "dictionary.md")
+    bad_samples = _scan_samples(out_dir)
+    findings += [h for hits in bad_samples.values() for h in hits]
+    if findings:
+        _fail_closed(findings, [dict_path, md_path, *written, *bad_samples])
     with open(os.path.join(out_dir, "run_manifest.json"), "w") as f:
         json.dump({"data_dir": data_dir,
                    "thresholds": thresholds.__dict__,
@@ -201,10 +286,15 @@ def build_synthetic_from_dictionary(dict_path, out_dir, join_keys=None,
     # overrides detection for every file.
     with open(dict_path) as f:
         d = json.load(f)
+    # An older dictionary (built before the per-value filter) may hold UUID-shaped
+    # categories; refuse before writing anything rather than republish them.
+    findings = _dictionary_findings({k: v for k, v in d.items() if k != "sources"})
+    if findings:
+        _fail_closed(findings, [])
     ss = os.path.join(out_dir, "synthetic_samples")
     os.makedirs(ss, exist_ok=True)
     id_pool = [f"SYNTH_{i:04d}" for i in range(id_pool_size)]
-    written = 0
+    written, paths = 0, []
     for name, prof in d["files"].items():
         if prof.get("role") == "codebook":
             continue
@@ -214,7 +304,11 @@ def build_synthetic_from_dictionary(dict_path, out_dir, join_keys=None,
             jk = (detected,) if detected else ()
         synth = synthesize(prof, n_rows=n_rows, seed=seed, join_keys=jk, id_pool=id_pool)
         _write_synthetic(synth, os.path.join(ss, name), prof)
+        paths.append(os.path.join(ss, name))
         written += 1
+    bad_samples = _scan_samples(out_dir)
+    if bad_samples:
+        _fail_closed([h for hits in bad_samples.values() for h in hits], [*paths, *bad_samples])
     return written
 
 def synthetic_main():

@@ -47,7 +47,7 @@ def _histogram(s, thresholds):
     return out
 
 def profile_column(series, name="", thresholds=DEFAULTS):
-    from .sensitivity import is_sensitive
+    from .sensitivity import is_sensitive, as_text, contains_uuid
     n = int(series.shape[0])
     out = {"dtype": str(series.dtype), "n": n,
            "pct_missing": round(float(series.isna().mean()) * 100, 2),
@@ -61,11 +61,19 @@ def profile_column(series, name="", thresholds=DEFAULTS):
         out["histogram"] = _histogram(series, thresholds)
     else:
         if out["cardinality"] <= thresholds.cardinality_cap:
-            counts = series.dropna().astype(str).value_counts()
-            out["categories"] = sorted(str(v) for v, c in counts.items() if c >= thresholds.k)
+            counts = as_text(series.dropna()).value_counts()
+            passing = [str(v) for v, c in counts.items() if c >= thresholds.k]
+            # Per-value guarantee: a UUID-shaped value is never published, whatever the
+            # column verdict (a minority of UUIDs, or UUIDs past is_sensitive's sample,
+            # leave the column non-sensitive). This list is the only source of category
+            # values for dictionary.json, dictionary.md and the synthetic samples.
+            out["categories"] = sorted(v for v in passing if not contains_uuid(v))
             n_rare = int((counts < thresholds.k).sum())
             if n_rare:
                 out["rare_categories_suppressed"] = n_rare
+            n_uuid = len(passing) - len(out["categories"])
+            if n_uuid:
+                out["uuid_categories_withheld"] = n_uuid   # distinct values that met k
         else:
             out["categories"] = None
             out["suppressed_high_cardinality"] = True
