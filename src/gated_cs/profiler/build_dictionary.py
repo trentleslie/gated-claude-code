@@ -51,7 +51,12 @@ def _sample_findings(path, label):
 def _scan_samples(out_dir):
     # {path: findings} for every file under synthetic_samples, stale ones included
     ss, found = os.path.join(out_dir, "synthetic_samples"), {}
-    for root, _, names in os.walk(ss):
+    def _unreadable(err):
+        # os.walk skips a directory it cannot list unless told otherwise; an unchecked
+        # subtree must fail the build, exactly as an unreadable file does
+        where = err.filename or ss
+        found[where] = [f"{_redact(os.path.relpath(where, out_dir))} (unreadable directory, cannot be checked)"]
+    for root, _, names in os.walk(ss, onerror=_unreadable):
         for fn in names:
             full = os.path.join(root, fn)
             hits = _sample_findings(full, _redact(os.path.relpath(full, out_dir)))
@@ -59,7 +64,7 @@ def _scan_samples(out_dir):
                 found[full] = hits
     return found
 
-def _fail_closed(findings, remove):
+def _fail_closed(findings, remove, removed=True):
     # Fail-closed pre-release check: nothing this run wrote stays readable, and the message
     # names each file and field (never the value) so the operator can fix the source.
     for p in remove:
@@ -68,9 +73,10 @@ def _fail_closed(findings, remove):
         except OSError:
             pass
     shown = "; ".join(findings[:20]) + (f"; ...and {len(findings) - 20} more" if len(findings) > 20 else "")
-    raise PublishedUUIDError(
-        "UUID-shaped value found in published output; this run's artifacts were removed. "
-        f"Fix or exclude the source, then rebuild. Found in: {shown}")
+    what = ("UUID-shaped value found in published output; this run's artifacts were removed. "
+            if removed else
+            "UUID-shaped value would reach published output; nothing was written. ")
+    raise PublishedUUIDError(f"{what}Fix or exclude the source, then rebuild. Found in: {shown}")
 
 def _sha256(path, buf=1 << 20):
     h = hashlib.sha256()
@@ -261,13 +267,25 @@ def add_layer_to_dictionary(dict_path, out_dir, name, df, thresholds=DEFAULTS,
     # _render_md iterates d["sources"]; register derived layers (no device folder)
     # under the "" root source so they aren't silently dropped from dictionary.md.
     d.setdefault("sources", {}).setdefault("", {})[name] = prof
-    with open(dict_path, "w") as f: json.dump(d, f, indent=2)
-    with open(os.path.join(os.path.dirname(dict_path), "dictionary.md"), "w") as f:
-        f.write(_render_md(d))
-    ss = os.path.join(out_dir, "synthetic_samples"); os.makedirs(ss, exist_ok=True)
+    md = _render_md(d)
     id_pool = [f"SYNTH_{i:04d}" for i in range(id_pool_size)]
     synth = synthesize(prof, n_rows=100, seed=0, join_keys=join_keys, id_pool=id_pool)
-    synth.to_csv(os.path.join(ss, name if name.endswith(".csv") else name + ".csv"), index=False)
+    sample = name if name.endswith(".csv") else name + ".csv"
+    # Same fail-closed checks as build(), run BEFORE anything is written: a derived layer's
+    # name and column names (e.g. a pivot keyed on staff UUIDs) are copied verbatim into
+    # both dictionary files and the sample header, so nothing is published on a finding.
+    findings = _dictionary_findings({k: v for k, v in d.items() if k != "sources"})
+    findings += _text_findings(md, "dictionary.md")
+    label = _redact(os.path.join("synthetic_samples", sample))
+    findings += [f"{label} column {i}" for i, c in enumerate(synth.columns)
+                 if contains_uuid(c) or uuid_mask(synth[c]).any()]
+    if findings:
+        _fail_closed(findings, [], removed=False)
+    with open(dict_path, "w") as f: json.dump(d, f, indent=2)
+    with open(os.path.join(os.path.dirname(dict_path), "dictionary.md"), "w") as f:
+        f.write(md)
+    ss = os.path.join(out_dir, "synthetic_samples"); os.makedirs(ss, exist_ok=True)
+    synth.to_csv(os.path.join(ss, sample), index=False)
     return prof
 
 def main():
