@@ -167,3 +167,37 @@ def test_count_column_does_not_bypass_numeric_per_person_check():
     v = check_table(df)
     assert v.status == "block"
     assert "per-person" in v.reason.lower()
+
+# --- UUID-shaped values at the release gate (pre-rebuild hardening R3 + Unit 6) ---
+_GATE_UUIDS = ["3f2b8c1e-9a4d-4e6f-8b7a-1c2d3e4f5a6b", "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+               "7c9e6679-7425-40de-944b-e07fc1f90ae7", "550e8400-e29b-41d4-a716-446655440000"]
+
+def test_count_table_grouped_by_uuid_column_is_quarantined():
+    # R3: 4 groups would release as a small grouped count, but the labels are UUIDs
+    df = pd.DataFrame({"coach": _GATE_UUIDS, "count": [10, 12, 15, 20]})
+    v = check_table(df)
+    assert v.status == "block"
+
+def test_count_table_with_padded_uuid_labels_is_quarantined():
+    # Unit 6: placeholder rows keep the UUID share under the column rule's bar and the
+    # group count under 5; the per-value check must still quarantine.
+    df = pd.DataFrame({"coach": [_GATE_UUIDS[0], "w", "x", "y"], "count": [10, 10, 10, 10]})
+    v = check_table(df)
+    assert v.status == "block" and "uuid" in v.reason.lower()
+    assert _GATE_UUIDS[0] not in v.reason     # the audit reason must not carry the value
+
+def test_countless_table_with_one_uuid_cell_is_quarantined():
+    df = pd.DataFrame({"label": [_GATE_UUIDS[0], "x", "x"]})
+    v = check_table(df)
+    assert v.status == "block" and "uuid" in v.reason.lower()
+
+def test_uuid_as_output_column_name_is_quarantined():
+    # a pivot puts the grouping values in the header
+    df = pd.DataFrame({"metric": ["mean"], _GATE_UUIDS[0]: [1.5], _GATE_UUIDS[1]: [2.5]})
+    v = check_table(df)
+    assert v.status == "block" and "uuid" in v.reason.lower()
+    assert _GATE_UUIDS[0] not in v.reason
+
+def test_four_group_count_with_ordinary_labels_still_releases():
+    df = pd.DataFrame({"arm": ["a", "b", "c", "d"], "count": [10, 12, 15, 20]})
+    assert check_table(df).status == "allow"
