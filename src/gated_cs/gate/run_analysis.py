@@ -4,6 +4,7 @@ from .sdc import check_table
 from .scrub import scrub
 from .audit import AuditLog
 from .derive import persist_layer, DerivationError
+from ..profiler.build_dictionary import PublishedUUIDError, add_layer_to_dictionary
 from ..config import DEFAULTS
 
 def _hash(path):
@@ -191,12 +192,16 @@ def run(script_path, data_dir, out_dir, audit_path, queue_dir, results_dir=None,
                 audit.record({"script_hash": sh, "verdict": "derivation", "layer": layer_name,
                               "n_persons": man["n_persons"], "data_hash": man["data_hash"]})
                 if dict_path and os.path.exists(dict_path):
-                    from ..profiler.build_dictionary import add_layer_to_dictionary
                     from .derive import read_layer_frame
                     dfl = read_layer_frame(os.path.join(derived_dir, layer_name, man["data_file"]))
                     add_layer_to_dictionary(dict_path, os.path.dirname(dict_path), layer_name, dfl)
             except DerivationError as e:
                 audit.record({"script_hash": sh, "verdict": "derivation_rejected", "reason": scrub(str(e))})
+            except PublishedUUIDError as e:
+                # the layer is persisted (private derived store) but was NOT added to the
+                # published dictionary or samples; the rest of the run completes normally
+                audit.record({"script_hash": sh, "verdict": "dictionary_update_rejected",
+                              "layer": layer_name, "reason": scrub(str(e))})
 
     status = "queued" if queued else "released"
     return {"status": status, "outputs": released,

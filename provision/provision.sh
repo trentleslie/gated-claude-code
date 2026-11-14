@@ -61,7 +61,7 @@ fi
 
 echo "== 5. gate working dirs =="
 mkdir -p /var/gate/queue /var/gate/incoming /var/gate/results /opt/gate
-: > /var/gate/audit.jsonl
+touch /var/gate/audit.jsonl   # create if absent; NEVER truncate: this is the only record of past release decisions
 chown cs-exec:cs-exec /var/gate/audit.jsonl;   chmod 0600 /var/gate/audit.jsonl   # audit: cs-exec only
 chown cs-exec:cs-exec /var/gate/queue;         chmod 0700 /var/gate/queue          # quarantine: cs-exec only
 chown cs-gated:csbridge /var/gate/incoming;    chmod 2750 /var/gate/incoming       # scripts in  (cs-gated -> cs-exec)

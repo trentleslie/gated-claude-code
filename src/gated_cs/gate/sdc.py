@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 import pandas as pd
 from ..config import DEFAULTS
-from ..profiler.sensitivity import is_sensitive
+from ..profiler.sensitivity import is_sensitive, contains_uuid, uuid_mask
 _ID = re.compile(r"(email|mrn|ssn|dob|birth|name|address|zip|phone|geo|_id$|^id$)", re.I)
 
 @dataclass
@@ -91,12 +91,35 @@ def _per_person_verdict(df, thresholds, has_count=False, count_col=None):
                                 f"human review required: {quasi}")
     return None
 
+def _uuid_verdict(df):
+    """Per-value UUID check, before either release path. The analyst's script controls its
+    own output: grouping by a UUID-valued column and padding with placeholder rows keeps the
+    UUID share under is_sensitive's column bar and the group count under k, so the column
+    rule alone would release real identifiers. Any UUID-shaped value, or column name (a
+    pivot puts the grouping values in the header), quarantines the table. The reason names
+    the column by position only, so the audit log never carries the value. Fail closed: an
+    error while checking quarantines."""
+    try:
+        for i, c in enumerate(df.columns):
+            if contains_uuid(c):
+                return Verdict("block", f"UUID-shaped column name (column {i}), "
+                                        "human review required")
+            if uuid_mask(df[c]).any():
+                return Verdict("block", f"UUID-shaped value(s) in column {i}, "
+                                        "human review required")
+    except Exception:
+        return Verdict("block", "UUID check could not classify the table, human review required")
+    return None
+
 def check_table(df, thresholds=DEFAULTS):
     if len(df) > thresholds.row_cap:
         return Verdict("block", f"row count {len(df)} exceeds cap {thresholds.row_cap}")
     for c in df.columns:
         if _ID.search(str(c)):
             return Verdict("block", f"identifier-like column: {c}")
+    uv = _uuid_verdict(df)
+    if uv is not None:
+        return uv
     cc = _count_col(df)
     if cc is not None:
         # A count column signals an aggregate, but does NOT exempt the OTHER columns from
