@@ -23,13 +23,12 @@ def uuid_text(value):
         return str(uuid.UUID(bytes=raw)) if len(raw) == 16 else raw.decode("latin-1")
     return str(value)
 
-_BINARY = (bytes, bytearray, memoryview, uuid.UUID)
-
 def as_text(series):
     """series.astype(str) that also works for binary values: pandas raises on bytes that
-    are not valid UTF-8 (every binary UUID), and str() of bytes is a byte-repr. Columns
-    without binary values keep the exact astype(str) rendering."""
-    if series.dtype == object and series.map(lambda v: isinstance(v, _BINARY)).any():
+    are not valid UTF-8 (most binary UUIDs) and would mis-render the rest. Only object
+    columns that are not plain strings take the per-value path, where uuid_text equals
+    str() for everything except bytes and UUID objects."""
+    if series.dtype == object and pd.api.types.infer_dtype(series, skipna=True) != "string":
         return series.map(uuid_text)
     return series.astype(str)
 

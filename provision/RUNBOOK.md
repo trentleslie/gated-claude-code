@@ -30,6 +30,24 @@ End-to-end gate behaviour (cs-gated `submit-analysis <script>`):
 | tiny subgroup (`count 2 < k=5`) | **suppressed** | delivered output keeps only `big,100`; audit: "suppressed 1 cells < k=5" |
 | adversarial: `open('/var/gate/audit.jsonl','a')` + socket connect | **blocked** | script wrote nothing; **TAMPER count in audit = 0**; network refused under `--unshare-net` |
 
+What a grouped count releases (checked against `gate/sdc.py` by running the gate, 2026-11-13). Expect
+routine quarantines; they are the rule working, not a fault:
+| Submitted table | Verdict |
+|---|---|
+| one grouping column, **fewer than 5** labelled groups, plus a count column | **released** (cells below k=5 are dropped first) |
+| one grouping column with **5 or more** labelled groups | **quarantined** for review |
+| a **second** categorical column (a two-way crosstab), at any size | **quarantined** for review |
+| any **UUID-shaped** value or column name anywhere in the table, or a mostly-UUID column | **quarantined** for review |
+
+Caveat: a grouping column whose *name* matches the sensitive-name patterns is quarantined at any group
+count. That includes `timepoint`, `visit_date` and anything ending `_id` (the patterns match on `time`,
+`date`, `name`, `_id`, `_at`, `birth`, `zip`, `geo`, `email`, `phone`, `address` and similar). A 3-group
+count by `timepoint` goes to review; the same table with the column named `arm` releases.
+
+Known limit: the UUID check stops identifiers being released by accident. A script that re-encodes an
+identifier (strips characters, hashes it) or invents counts can still pass a small table. The gate does
+not detect that; it is the reviewer's and the monitor's job.
+
 Sandbox (bubblewrap 0.11, wraps only the untrusted child inside `run_analysis`): `--unshare-net`
 `--unshare-pid` `--new-session` `--clearenv`, data read-only, `out_dir` the only writable bind, audit/queue
 **not mounted** into the child.
@@ -48,6 +66,53 @@ Sandbox (bubblewrap 0.11, wraps only the untrusted child inside `run_analysis`):
    (back up any existing `/var/gate/dict`, `rm -f "$S/reid_report.json"`, `mv "$S" /var/gate/dict`,
    `chown -R cs-exec:csbridge`, dirs 750 / files 640). Canonical steps: README.md step 6(b).
    (The historical entries below record the original direct builds; follow this step, not them.)
+
+   **Pre-release check (UUID scan).** `build-dictionary` scans what it wrote (`dictionary.json`,
+   `dictionary.md`, every file under `synthetic_samples`) for UUID-shaped values and exits with an error
+   if any is found. `build-synthetic` checks the dictionary it is given before writing anything, then
+   scans the samples. The error names the file and field, never the value, and the
+   build removes the artifacts it wrote. Category values are filtered automatically (the dictionary shows
+   `uuid_categories_withheld` on the column); the scan fails on what cannot be filtered: a UUID in a `#`
+   comment line, a column description, a column name or a file name. Fix or exclude that source file and
+   rebuild. The scan covers UUIDs only. Hashes, prefixed codes and usernames are not detected, so the
+   by-eye review above still applies to every published category list.
+
+   **After upgrading a box**, rebuild the dictionary and synthetic samples with the steps above before
+   the analyst account sees them again. Upgrading the code does not rewrite an existing dictionary: one
+   built by an older version keeps publishing whatever it already contains (on the Arivale box, the staff
+   UUIDs in the `coach` column) until it is rebuilt and republished.
+
+## Audit log: preserve it, and what the monitor covers
+
+`/var/gate/audit.jsonl` is the only record of past release decisions and the only input to the
+differencing monitor.
+
+- `provision.sh` creates the log when it is absent and never truncates it. Re-running provisioning keeps
+  existing entries (owner `cs-exec:cs-exec` and mode `0600` are re-applied every run).
+- **Before retiring or rebuilding a box, archive the log** to a data-owner-only location: owner-only
+  mode (`0600`), outside `/var/gate` and outside any path the analyst account (`cs-gated`) or the bridge
+  group (`csbridge`) can read. A rebuild from a fresh image does not carry the log over by itself.
+  ```bash
+  install -d -m 0700 /root/gate-audit-archive
+  install -m 0600 /var/gate/audit.jsonl "/root/gate-audit-archive/audit-$(hostname)-$(date -u +%Y%m%dT%H%M%SZ).jsonl"
+  ```
+
+**Differencing monitor (`gate-monitor`).** It is **not scheduled**; nothing runs it unless an operator
+does. Run it by hand as root, writing the report somewhere the analyst cannot read:
+```bash
+/opt/gated-cs/bin/gate-monitor /var/gate/audit.jsonl /root/gate-audit-archive/monitor-$(date -u +%Y%m%dT%H%M%SZ).json
+```
+Exit code 0 means no flag, 1 means a probing signature was flagged; the report is written either way.
+- **Detects threshold probing:** many distinct scripts in a short run of decisions with most of them
+  suppressed or quarantined (defaults: 8 distinct scripts and a 50% suppression rate within 10 consecutive
+  decisions), and one output name flipping between released and not released 4 or more times in a session.
+- **Does not detect subtraction** across nested or overlapping releases that each pass on their own (for
+  example a count for a cohort and a count for the same cohort minus one person). That needs a manual
+  check of what was released.
+- An empty or missing log reports a pass, so check `total_entries` in the report.
+- Routine quarantines (see the grouped-count table above) raise the suppression rate the monitor
+  measures, so expect flags that are review load rather than probing until the thresholds are calibrated
+  on a real log.
 
 ## Phase 3 — the gated Claude Science instance (DONE 2026-07-15, pending auth)
 

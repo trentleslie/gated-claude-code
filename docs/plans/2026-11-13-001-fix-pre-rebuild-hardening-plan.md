@@ -1,7 +1,7 @@
 ---
 title: "fix: Pre-rebuild hardening (UUID categories, gate rule descriptions, audit log preservation)"
 type: fix
-status: active
+status: completed
 date: 2026-11-13
 origin: docs/brainstorms/2026-11-13-pre-rebuild-hardening-requirements.md
 ---
@@ -91,7 +91,7 @@ Research was done inline from the source at `02d25ac`; no research agents and no
 
 ## Implementation Units
 
-- [ ] **Unit 1: UUID shape test and column sensitivity rule**
+- [x] **Unit 1: UUID shape test and column sensitivity rule**
 
 **Goal:** Define "UUID-shaped" once and make a mostly-UUID column sensitive.
 
@@ -126,7 +126,7 @@ Research was done inline from the source at `02d25ac`; no research agents and no
 **Verification:**
 - The sensitivity and SDC tests pass, including the pre-existing ones.
 
-- [ ] **Unit 2: Per-value filter on published categories and codebook text**
+- [x] **Unit 2: Per-value filter on published categories and codebook text**
 
 **Goal:** No UUID-shaped value reaches any published artifact, whatever the column verdict.
 
@@ -168,7 +168,7 @@ Research was done inline from the source at `02d25ac`; no research agents and no
 **Verification:**
 - Using the existing `_artifacts` helper's three surfaces (dictionary JSON, rendered text, synthetic samples), the shared pattern finds nothing in any fixture, both formats, and each fixture's literal UUIDs are absent.
 
-- [ ] **Unit 3: Audit log preservation in provisioning**
+- [x] **Unit 3: Audit log preservation in provisioning**
 
 **Goal:** Re-running provisioning leaves existing audit entries in place.
 
@@ -194,7 +194,7 @@ Research was done inline from the source at `02d25ac`; no research agents and no
 **Verification:**
 - The bridge-file tests pass; reading step 5 shows an existing log is untouched and a missing log is created.
 
-- [ ] **Unit 4: Stale wrapper-pinning assertion**
+- [x] **Unit 4: Stale wrapper-pinning assertion**
 
 **Goal:** The wrapper-pinning test asserts the property it protects and passes.
 
@@ -215,7 +215,7 @@ Research was done inline from the source at `02d25ac`; no research agents and no
 **Verification:**
 - The test passes and still fails if the placeholder line is removed from the wrapper.
 
-- [ ] **Unit 5: Rule descriptions in config comment and runbook**
+- [x] **Unit 5: Rule descriptions in config comment and runbook**
 
 **Goal:** `config.py` and the runbook describe the gate as it behaves.
 
@@ -240,7 +240,7 @@ Research was done inline from the source at `02d25ac`; no research agents and no
 **Verification:**
 - A reader of the two files predicts: 4-group count releases, 8-group count is quarantined, two-way crosstab is quarantined.
 
-- [ ] **Unit 6: Per-value UUID check at the release gate (approved by owner, 2026-11-13)**
+- [x] **Unit 6: Per-value UUID check at the release gate (approved by owner, 2026-11-13)**
 
 **Goal:** A submitted output table that contains any UUID-shaped value in a non-count column is quarantined.
 

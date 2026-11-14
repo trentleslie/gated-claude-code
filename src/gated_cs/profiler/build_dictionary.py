@@ -192,8 +192,8 @@ def build(data_dir, out_dir=None, thresholds=DEFAULTS, id_pool_size=50):
     # not scanned: it holds input hashes and package versions, not data values.
     with open(dict_path) as f:
         on_disk = json.load(f)
+    # ("sources" repeats "files" grouped by top-level folder, so it is walked once)
     findings = _dictionary_findings({k: v for k, v in on_disk.items() if k != "sources"})
-    findings += _dictionary_findings({"sources": dict.fromkeys(on_disk.get("sources", {}))})
     with open(md_path) as f:
         findings += _text_findings(f.read(), "dictionary.md")
     bad_samples = _scan_samples(out_dir)

@@ -10,6 +10,9 @@ class Thresholds:
     # --- SDC residual-risk hardening (small per-person tables at the release gate) ---
     near_unique_ratio: float = 0.9    # non-numeric column with nunique/n above this is
                                       # identifier-like (shared by profiler.is_sensitive)
-    max_quasi_identifier_cols: int = 1  # more than this many co-occurring quasi-identifier
-                                        # columns in a count-less table -> quarantine (R3)
+    max_quasi_identifier_cols: int = 1  # more than this many co-occurring low-cardinality
+                                        # categorical (quasi-identifier) columns -> quarantine
+                                        # (R3). Applies on BOTH release paths: a count-bearing
+                                        # table with a second grouping column (a two-way
+                                        # crosstab) is quarantined too, not only count-less ones
 DEFAULTS = Thresholds()
