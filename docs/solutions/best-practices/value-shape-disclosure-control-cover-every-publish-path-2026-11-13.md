@@ -30,7 +30,7 @@ tags: [uuid, non-disclosure, fail-closed, publish-paths, pandas-categorical, aud
 
 PR [#25](https://github.com/trentleslie/gated-claude-code/pull/25) (`fix/pre-rebuild-hardening`, 7 commits,
 head `2fb4217`, base `master` at `02d25ac`) hardened the repo before the Arivale box is rebuilt from
-`master`. Requirements and plan are in the PR:
+`master`. It merged on 2026-11-14 as `b92c373`. Requirements and plan are in the PR:
 `docs/brainstorms/2026-11-13-pre-rebuild-hardening-requirements.md` and
 `docs/plans/2026-11-13-001-fix-pre-rebuild-hardening-plan.md`.
 
@@ -82,8 +82,8 @@ missed. Each one was a gap in coverage, not in the rule itself.
    dictionary; it now serializes first.
 
 Greptile scored the PR 3/5 at commit `38cd196` with those two findings. Commits `c3f0b7d` and `2fb4217` came
-after that review. As of this writing Greptile's summary still names `38cd196` as the last reviewed commit,
-so the fixes have not been re-scored and the PR is open, not merged.
+after that review. Greptile re-reviewed head `2fb4217` at 5/5 on 2026-11-14, and the PR merged to `master`
+as `b92c373` the same day.
 
 ## Guidance
 
@@ -170,7 +170,7 @@ touch /var/gate/audit.jsonl      # after: create if absent, never truncate
 - PR [#25](https://github.com/trentleslie/gated-claude-code/pull/25): the change this documents.
 - `docs/solutions/best-practices/parquet-input-format-disclosure-controlled-profiler-2026-10-26.md`: same
   lesson for readers ("route every reader"); this doc is the writer-side counterpart. Moderate overlap; a
-  consolidation review is reasonable once #25 merges.
+  consolidation review is reasonable now that #25 has merged.
 - `docs/solutions/best-practices/synthetic-data-sdc-mechanical-nondisclosure-gate-2026-07-22.md`: disclosure
   controls are locked by mechanical tests that prove the control fires.
 - `docs/solutions/best-practices/runbook-verification-commands-are-security-checks-2026-11-11.md` and
